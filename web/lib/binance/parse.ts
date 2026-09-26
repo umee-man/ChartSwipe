@@ -127,3 +127,17 @@ export function tickDecimals(tickSize: number): number {
   const dot = s.indexOf('.')
   return dot === -1 ? 0 : s.length - dot - 1
 }
+
+/**
+ * Price precision when exchangeInfo (real tickSize) is unavailable: enough decimals for ~4–5
+ * significant digits, e.g. 65000 → 2, 1.5 → 4, 0.05 → 6, 0.0000123 → 10 (capped). Never below 2.
+ */
+export function fallbackPrecision(price: number | null | undefined): number {
+  if (price == null || !(price > 0) || !Number.isFinite(price)) return 2
+  return Math.min(10, Math.max(2, 4 - Math.floor(Math.log10(price))))
+}
+
+/** Tick size implied by `fallbackPrecision` (10^-precision). */
+export function fallbackTickSize(price: number | null | undefined): number {
+  return Number((10 ** -fallbackPrecision(price)).toFixed(10))
+}

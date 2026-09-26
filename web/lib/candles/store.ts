@@ -1,6 +1,6 @@
 // In-memory candle repository (framework-free). Holds candles for the ±3 ticker window (arch §5.2),
 // hydrates from IndexedDB first, then fetches the fresh tail; pages history to the left on demand.
-import { fetchKlines, KLINES_LIMIT } from '../binance/rest'
+import { fetchKlines, KLINES_LIMIT, rateLimitGate } from '../binance/rest'
 import type { Candle, Interval } from '../binance/types'
 import { readCandles, writeCandles } from '../cache/candles'
 import { applyLiveCandle, intervalSeconds, mergeCandles, mergeFreshTail } from './merge'
@@ -17,6 +17,10 @@ export interface SeriesState {
   historyExhausted: boolean
   /** ms timestamp of the last successful network fetch of the tail; 0 = only cache so far. */
   fetchedAt: number
+  /** History paging is paused until this ms timestamp after a failure (backoff). */
+  olderRetryAt: number
+  /** Consecutive history-page failures (drives the backoff). */
+  olderFailures: number
 }
 
 export type SeriesEventKind = 'reset' | 'live' | 'prepend' | 'status'
@@ -35,6 +39,11 @@ export function seriesKey(symbol: string, tf: string): string {
 
 /** Tail is considered fresh for this long; after that `ensure` refetches in the background. */
 const DEFAULT_MAX_AGE_MS = 30_000
+
+/** Backoff for failed history pages: 2 s, 4 s, 8 s … capped at 60 s. */
+export function olderRetryDelay(failures: number): number {
+  return Math.min(60_000, 2000 * 2 ** Math.max(0, failures - 1))
+}
 
 export class CandleStore {
   private readonly map = new Map<string, SeriesState>()
@@ -68,6 +77,8 @@ export class CandleStore {
         loadingOlder: false,
         historyExhausted: false,
         fetchedAt: 0,
+        olderRetryAt: 0,
+        olderFailures: 0,
       }
       this.map.set(key, s)
     }
@@ -91,12 +102,22 @@ export class CandleStore {
     return p
   }
 
+  /** Put `s` back into the map if retain() dropped it meanwhile, so the loaded data is not orphaned. */
+  private reattach(s: SeriesState): void {
+    const key = seriesKey(s.symbol, s.tf)
+    if (!this.map.has(key)) this.map.set(key, s)
+  }
+
   private async load(symbol: string, tf: Interval): Promise<SeriesState> {
     const s = this.state(symbol, tf)
+    // Network starts right away, in parallel with the (possibly slow) IndexedDB read.
+    const freshP = fetchKlines({ symbol, interval: tf, limit: KLINES_LIMIT })
+    freshP.catch(() => {}) // handled below; avoid an unhandled rejection while awaiting the cache
     if (s.candles.length === 0) {
       s.status = 'loading'
       this.emit(s, 'status')
       const cached = await readCandles(symbol, tf)
+      this.reattach(s)
       if (cached?.length && s.candles.length === 0) {
         s.candles = cached
         s.status = 'ready'
@@ -104,7 +125,8 @@ export class CandleStore {
       }
     }
     try {
-      const fresh = await fetchKlines({ symbol, interval: tf, limit: KLINES_LIMIT })
+      const fresh = await freshP
+      this.reattach(s)
       s.candles = mergeFreshTail(s.candles, fresh, intervalSeconds(tf))
       s.fetchedAt = Date.now()
       s.status = 'ready'
@@ -112,6 +134,7 @@ export class CandleStore {
       this.emit(s, 'reset')
       void writeCandles(symbol, tf, s.candles)
     } catch (err) {
+      this.reattach(s)
       s.error = err instanceof Error ? err.message : String(err)
       // Keep showing cached candles if we have them.
       s.status = s.candles.length ? 'ready' : 'error'
@@ -124,6 +147,7 @@ export class CandleStore {
   async loadOlder(symbol: string, tf: Interval): Promise<number> {
     const s = this.map.get(seriesKey(symbol, tf))
     if (!s || s.loadingOlder || s.historyExhausted || s.candles.length === 0) return 0
+    if (Date.now() < s.olderRetryAt) return 0
     s.loadingOlder = true
     try {
       const first = s.candles[0]!.time
@@ -136,10 +160,14 @@ export class CandleStore {
       const before = s.candles.length
       s.candles = mergeCandles(older, s.candles)
       const added = s.candles.length - before
+      s.olderFailures = 0
       this.emit(s, 'prepend', added)
       void writeCandles(symbol, tf, s.candles)
       return added
     } catch {
+      s.olderFailures++
+      // Never hammer the API: back off per series, and at least until the global 429 gate opens.
+      s.olderRetryAt = Date.now() + Math.max(olderRetryDelay(s.olderFailures), rateLimitGate.remaining())
       return 0
     } finally {
       s.loadingOlder = false
@@ -162,10 +190,13 @@ export class CandleStore {
     this.emit(s, 'live')
   }
 
-  /** Drop every series whose symbol is not in `keep` (memory budget, arch §5.2). Persists them first. */
+  /**
+   * Drop every series whose symbol is not in `keep` (memory budget, arch §5.2). Persists them first.
+   * Series with a load in flight are kept; they are evicted on a later call.
+   */
   retain(keep: ReadonlySet<string>): void {
     for (const [key, s] of this.map) {
-      if (keep.has(s.symbol)) continue
+      if (keep.has(s.symbol) || this.inflight.has(key) || s.loadingOlder) continue
       if (s.candles.length) void writeCandles(s.symbol, s.tf, s.candles)
       this.map.delete(key)
     }

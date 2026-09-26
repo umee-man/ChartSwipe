@@ -22,6 +22,36 @@ export class BinanceHttpError extends Error {
   }
 }
 
+/** Default block after a 429/418 when the server sends no Retry-After, ms. */
+export const DEFAULT_RATE_LIMIT_BLOCK_MS = 60_000
+
+/**
+ * Module-wide gate: after a 429 (rate limited) or 418 (IP ban) every fapi call is refused locally
+ * until Retry-After passes, so a misbehaving loop can never escalate a 429 into a ban.
+ */
+export class RateLimitGate {
+  private blockedUntil = 0
+
+  /** ms remaining in the block, 0 if open. */
+  remaining(now = Date.now()): number {
+    return Math.max(0, this.blockedUntil - now)
+  }
+
+  /** Record a response. `retryAfter` is the raw Retry-After header (seconds). */
+  record(status: number, retryAfter: string | null, now = Date.now()): void {
+    if (status !== 429 && status !== 418) return
+    const sec = retryAfter == null ? Number.NaN : Number.parseInt(retryAfter, 10)
+    const ms = Number.isFinite(sec) && sec > 0 ? sec * 1000 : DEFAULT_RATE_LIMIT_BLOCK_MS
+    this.blockedUntil = Math.max(this.blockedUntil, now + ms)
+  }
+
+  reset(): void {
+    this.blockedUntil = 0
+  }
+}
+
+export const rateLimitGate = new RateLimitGate()
+
 type Query = Record<string, string | number | undefined>
 
 export function buildUrl(path: string, query: Query = {}, base = FAPI_BASE): string {
@@ -34,7 +64,10 @@ export function buildUrl(path: string, query: Query = {}, base = FAPI_BASE): str
 }
 
 async function getJson(path: string, query?: Query, signal?: AbortSignal): Promise<unknown> {
+  const wait = rateLimitGate.remaining()
+  if (wait > 0) throw new BinanceHttpError(429, path, `blocked locally for ${Math.ceil(wait / 1000)} s`)
   const res = await fetch(buildUrl(path, query), { signal })
+  rateLimitGate.record(res.status, res.headers.get('Retry-After'))
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new BinanceHttpError(res.status, path, body)

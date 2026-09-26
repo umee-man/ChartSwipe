@@ -28,9 +28,30 @@ interface ChartSwipeDB extends DBSchema {
   meta: { key: string; value: MetaRecord }
 }
 
+/** iOS Safari can leave indexedDB.open() pending forever; give up after this long. */
+export const DB_OPEN_TIMEOUT_MS = 500
+
+/** Resolve to `p`'s value, or to null if it does not settle within `ms`. */
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(null), ms)
+    p.then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      (e: unknown) => {
+        clearTimeout(t)
+        reject(e)
+      },
+    )
+  })
+}
+
 let dbPromise: Promise<IDBPDatabase<ChartSwipeDB>> | null = null
 
-function db(): Promise<IDBPDatabase<ChartSwipeDB>> | null {
+/** Open (once) the database; resolves to null when unavailable or hanging. */
+async function db(): Promise<IDBPDatabase<ChartSwipeDB> | null> {
   if (typeof indexedDB === 'undefined') return null
   dbPromise ??= openDB<ChartSwipeDB>(DB_NAME, DB_VERSION, {
     upgrade(d) {
@@ -41,7 +62,7 @@ function db(): Promise<IDBPDatabase<ChartSwipeDB>> | null {
     dbPromise = null
     throw err
   })
-  return dbPromise
+  return withTimeout(dbPromise, DB_OPEN_TIMEOUT_MS)
 }
 
 /** Cache failures must never break the feed: every call degrades to a no-op. */
