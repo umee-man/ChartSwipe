@@ -65,7 +65,6 @@ onBeforeUnmount(() => {
   <main class="feed">
     <FeedHeader @open-favorites="favoritesOpen = true" />
     <FeedPager>
-      <SideActions :symbol="feed.currentSymbol" @hidden="onHidden" />
       <div v-if="lastHidden" class="toast" data-gesture-ignore>
         <span>{{ lastHidden }} скрыт</span>
         <button type="button" @click="undoHide">Вернуть</button>
@@ -73,6 +72,7 @@ onBeforeUnmount(() => {
       <div v-if="feed.error && feed.symbols.length > 0" class="toast error" data-gesture-ignore>Binance: {{ feed.error }}</div>
     </FeedPager>
     <TfBar />
+    <ActionBar :symbol="feed.currentSymbol" @hidden="onHidden" @open-favorites="favoritesOpen = true" />
     <FavoritesSheet v-if="favoritesOpen" @close="favoritesOpen = false" />
   </main>
 </template>

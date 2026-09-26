@@ -13,7 +13,7 @@
 
   --header-h: 48px;
   --tfbar-h: 64px;
-  --actions-w: 52px;
+  --actions-h: 46px; /* bottom action row under the TF bar (ADR A14) */
 }
 
 *,

@@ -30,7 +30,6 @@ defineExpose({
 <style scoped>
 .feed-slide {
   position: absolute;
-  inset: 0;
-  right: var(--actions-w);
+  inset: 0; /* full width: actions live in the bottom row (ADR A14) */
 }
 </style>

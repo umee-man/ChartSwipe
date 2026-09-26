@@ -36,10 +36,11 @@ const label = (tf: Interval) => LABELS[tf] ?? tf
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  height: calc(var(--tfbar-h) + env(safe-area-inset-bottom));
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  height: var(--tfbar-h);
+  padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
   background: var(--surface);
   border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   touch-action: manipulation;
 }
 .tf {

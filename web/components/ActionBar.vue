@@ -1,11 +1,13 @@
 <script setup lang="ts">
-// Right action column: favorite, hide, level type selector (state only for now), screenshot stub.
+// Bottom action row under the TF bar (ADR A14, arch §5.8): favorite, hide, level type selector
+// (state only for now), favorites list, screenshot stub. Lives outside the feed pager, so touches here
+// never reach the gesture arbiter — taps are plain clicks and swipes do nothing.
 import { computed } from 'vue'
 import { LEVEL_KINDS, useLevelsStore } from '~/stores/levels'
 import { useWatchlistsStore } from '~/stores/watchlists'
 
 const props = defineProps<{ symbol: string | undefined }>()
-const emit = defineEmits<{ hidden: [symbol: string] }>()
+const emit = defineEmits<{ hidden: [symbol: string]; 'open-favorites': [] }>()
 
 const watchlists = useWatchlistsStore()
 const levels = useLevelsStore()
@@ -21,7 +23,7 @@ function hide() {
 </script>
 
 <template>
-  <aside class="actions" aria-label="Действия">
+  <nav class="action-bar" aria-label="Действия">
     <button
       type="button"
       class="act"
@@ -40,7 +42,7 @@ function hide() {
           stroke-linejoin="round"
         />
       </svg>
-      <span>Избр.</span>
+      <span>Избранное</span>
     </button>
 
     <button type="button" class="act" :disabled="!symbol" aria-label="Скрыть тикер" @click="hide">
@@ -55,17 +57,25 @@ function hide() {
     <button
       type="button"
       class="act"
-      :aria-label="`Тип уровня: ${kind.label}`"
+      :aria-label="`Тип уровня: ${kind.label}. Нажмите, чтобы сменить`"
       :style="{ color: kind.color }"
       @click="levels.cycleKind()"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <template v-if="kind.kind === 'zone'">
-          <rect x="3" y="8" width="18" height="8" rx="1.5" fill="currentColor" fill-opacity="0.3" />
-        </template>
+        <rect v-if="kind.kind === 'zone'" x="3" y="8" width="18" height="8" rx="1.5" fill="currentColor" fill-opacity="0.3" />
         <path v-else d="M3 12h18" />
       </svg>
       <span>{{ kind.label }}</span>
+    </button>
+
+    <button type="button" class="act" aria-label="Список избранного" @click="emit('open-favorites')">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <path d="M8 6h12M8 12h12M8 18h12" />
+        <circle cx="4" cy="6" r="1" fill="currentColor" />
+        <circle cx="4" cy="12" r="1" fill="currentColor" />
+        <circle cx="4" cy="18" r="1" fill="currentColor" />
+      </svg>
+      <span>Список</span>
     </button>
 
     <button type="button" class="act" disabled aria-label="Скриншот (скоро)">
@@ -75,40 +85,51 @@ function hide() {
       </svg>
       <span>Скрин</span>
     </button>
-  </aside>
+  </nav>
 </template>
 
 <style scoped>
-.actions {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--actions-w);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 0 20px;
-  padding-right: env(safe-area-inset-right);
-  z-index: 5;
+.action-bar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: stretch;
+  /* Bottom-most row owns the home-indicator safe area (the TF bar above no longer does). */
+  height: calc(var(--actions-h) + env(safe-area-inset-bottom));
+  padding: 0 max(4px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(4px, env(safe-area-inset-left));
+  background: var(--surface);
+  /* Taps only: no browser pan/zoom, no double-tap delay; not part of the feed gesture area. */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .act {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  width: 48px;
-  min-height: 48px;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  min-height: 44px;
   color: var(--text);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.1;
-  text-align: center;
+  -webkit-touch-callout: none;
+}
+.act span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .act svg {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
+}
+.act:active:not(:disabled) {
+  background: var(--surface-2);
+  border-radius: 10px;
 }
 .act.on {
   color: #f5c518;
