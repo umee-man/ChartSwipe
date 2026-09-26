@@ -3,6 +3,10 @@
 // Orchestrates preloading, the memory window and live WS streams (arch §4, §5.2).
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { liveSymbols, memorySymbols, preloadSymbols } from '~/lib/feed/window'
+import { tickDecimals } from '~/lib/binance/parse'
+import { lastCandle } from '~/lib/candles/merge'
+import { canvasToPng, composeScreenshot, shareOrDownload, type PlaqueSnapshot } from '~/lib/share/compose'
+import { headerText, screenshotFilename } from '~/lib/share/screenshot'
 import { useCandles } from '~/composables/useCandles'
 import { useFeedStore } from '~/stores/feed'
 import { useLevelsStore } from '~/stores/levels'
@@ -45,6 +49,55 @@ watch(
   { immediate: true },
 )
 
+// ---------------- screenshot (A19) ----------------
+type ShotSource = { canvas: HTMLCanvasElement; cssWidth: number; plaques: PlaqueSnapshot[] } | null
+const pager = ref<{ screenshotCurrent: () => ShotSource } | null>(null)
+const shotBusy = ref(false)
+const shotFlash = ref(false)
+const shotMessage = ref<{ text: string; error: boolean } | null>(null)
+let shotTimer: ReturnType<typeof setTimeout> | null = null
+function showShotMessage(text: string, error = false) {
+  shotMessage.value = { text, error }
+  if (shotTimer) clearTimeout(shotTimer)
+  shotTimer = setTimeout(() => (shotMessage.value = null), 3000)
+}
+
+async function takeScreenshot() {
+  const symbol = feed.currentSymbol
+  if (!symbol || shotBusy.value) return
+  shotBusy.value = true
+  try {
+    navigator.vibrate?.(10)
+  } catch {
+    // optional
+  }
+  shotFlash.value = true
+  setTimeout(() => (shotFlash.value = false), 180)
+  try {
+    const src = pager.value?.screenshotCurrent()
+    if (!src) throw new Error('график ещё не готов')
+    const tf = settings.activeTf
+    const ticker = feed.tickers[symbol]
+    const header = headerText({
+      symbol,
+      tf,
+      price: lastCandle(candles.store.get(symbol, tf)?.candles)?.close ?? ticker?.lastPrice ?? null,
+      decimals: tickDecimals(feed.tickSize(symbol)),
+      changePct: ticker?.priceChangePercent ?? null,
+      date: new Date(),
+    })
+    const blob = await canvasToPng(composeScreenshot({ chart: src.canvas, cssWidth: src.cssWidth, header, plaques: src.plaques }))
+    const res = await shareOrDownload(blob, screenshotFilename(symbol, tf))
+    if (res === 'downloaded') showShotMessage('Скриншот сохранён')
+    else if (res === 'shared') showShotMessage('Скриншот отправлен')
+    // 'cancelled' (share sheet dismissed) → silent
+  } catch (e) {
+    showShotMessage(`Не удалось сделать скриншот: ${e instanceof Error ? e.message : String(e)}`, true)
+  } finally {
+    shotBusy.value = false
+  }
+}
+
 const favoritesOpen = ref(false)
 const hiddenOpen = ref(false)
 const levelsOpen = ref(false)
@@ -80,13 +133,18 @@ onBeforeUnmount(() => {
   if (settleTimer) clearTimeout(settleTimer)
   if (undoTimer) clearTimeout(undoTimer)
   if (levelUndoTimer) clearTimeout(levelUndoTimer)
+  if (shotTimer) clearTimeout(shotTimer)
 })
 </script>
 
 <template>
   <main class="feed">
     <FeedHeader @open-favorites="favoritesOpen = true" @open-hidden="hiddenOpen = true" />
-    <FeedPager>
+    <FeedPager ref="pager">
+      <div v-if="shotFlash" class="shot-flash" aria-hidden="true" />
+      <div v-if="shotMessage" class="toast" :class="{ error: shotMessage.error }" role="status" data-gesture-ignore>
+        {{ shotMessage.text }}
+      </div>
       <div v-if="!levels.hintSeen && feed.currentSymbol" class="hint" data-gesture-ignore>
         <span>Удерживайте палец на графике, чтобы поставить уровень</span>
         <button type="button" @click="levels.dismissHint()">Понятно</button>
@@ -107,6 +165,8 @@ onBeforeUnmount(() => {
       @hidden="onHidden"
       @open-favorites="favoritesOpen = true"
       @open-levels="levelsOpen = true"
+      :busy="shotBusy"
+      @screenshot="takeScreenshot"
     />
     <FavoritesSheet v-if="favoritesOpen" @close="favoritesOpen = false" />
     <HiddenSheet v-if="hiddenOpen" @close="hiddenOpen = false" />
@@ -139,6 +199,22 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   font-size: 14px;
   white-space: nowrap;
+}
+.shot-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  background: #fff;
+  pointer-events: none;
+  animation: shot-flash 180ms ease-out forwards;
+}
+@keyframes shot-flash {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+  }
 }
 .hint {
   position: absolute;

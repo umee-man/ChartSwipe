@@ -7,6 +7,7 @@ import { domSlots } from '~/lib/feed/window'
 import { isDeleteSwipe, levelDragIntent, rubberBand, type GestureTarget } from '~/lib/gestures/arbiter'
 import type { Level } from '~/lib/levels/model'
 import type { MagnetResult } from '~/lib/levels/magnet'
+import type { PlaqueSnapshot } from '~/lib/share/compose'
 import { useGestures } from '~/composables/useGestures'
 import { useFeedStore } from '~/stores/feed'
 import { useLevelsStore } from '~/stores/levels'
@@ -58,6 +59,7 @@ type SlideApi = {
   hitLevel: (x: number, y: number) => string | null
   magnetAt: (x: number, y: number, pointerType: string, touchRadius: number) => MagnetResult | null
   priceForDrag: (startPrice: number, dy: number, x: number, pointerType: string, touchRadius: number) => MagnetResult | null
+  screenshot: () => { canvas: HTMLCanvasElement; cssWidth: number; plaques: PlaqueSnapshot[] } | null
 }
 
 /** Haptics (A17): plain placement 15 ms, snapped to a wick — a stronger double pulse. */
@@ -203,7 +205,12 @@ onBeforeUnmount(() => {
   if (animTimer) clearTimeout(animTimer)
 })
 
-defineExpose({ go, resetCurrent: () => nextTick(() => currentSlide()?.resetView()) })
+defineExpose({
+  go,
+  resetCurrent: () => nextTick(() => currentSlide()?.resetView()),
+  /** Current slide's chart for the screenshot (A19). */
+  screenshotCurrent: () => currentSlide()?.screenshot() ?? null,
+})
 </script>
 
 <template>

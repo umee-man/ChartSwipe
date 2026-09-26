@@ -31,6 +31,7 @@ defineExpose({
     chart.value?.magnetAt(x, y, pointerType, touchRadius) ?? null,
   priceForDrag: (startPrice: number, dy: number, x: number, pointerType: string, touchRadius: number): MagnetResult | null =>
     chart.value?.priceForDrag(startPrice, dy, x, pointerType, touchRadius) ?? null,
+  screenshot: () => chart.value?.screenshot() ?? null,
 })
 </script>
 

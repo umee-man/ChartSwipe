@@ -35,6 +35,7 @@ import { hitTestLabels, LABEL_H, layoutLabels, type LabelRect } from '~/lib/leve
 import { magnetPrice, magnetRadiusFor, type MagnetResult } from '~/lib/levels/magnet'
 import { toOhlc, toVolume } from '~/lib/candles/series'
 import type { ChartType } from '~/lib/chart/type'
+import type { PlaqueSnapshot } from '~/lib/share/compose'
 import { LEVEL_COLOR, levelsPriceRange, roundToTick, type Level } from '~/lib/levels/model'
 import type { SeriesEvent, SeriesStatus } from '~/lib/candles/store'
 import { useCandles } from '~/composables/useCandles'
@@ -60,7 +61,7 @@ const DOWN = '#ef5350'
 /** Start loading older history when fewer than this many bars remain to the left of the viewport. */
 const HISTORY_THRESHOLD_BARS = 30
 /** Right margin after the last bar, in bars (like TradingView's right offset). */
-const RIGHT_OFFSET_BARS = 10
+const RIGHT_OFFSET_BARS = 20
 /** Range-change events fire every frame while panning; check for history at most this often. */
 const HISTORY_CHECK_MS = 500
 
@@ -538,7 +539,23 @@ onBeforeUnmount(() => {
   volumeSeries = null
 })
 
-defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, priceForDrag })
+/**
+ * Screenshot source (A19): LWC canvas (candles, volume, level price lines, axes; no crosshair) plus the
+ * DOM plaques, which are not part of that canvas and are redrawn by lib/share/compose.ts.
+ */
+function screenshot(): { canvas: HTMLCanvasElement; cssWidth: number; plaques: PlaqueSnapshot[] } | null {
+  const c = chart.value
+  if (!c || !host.value) return null
+  layoutPlaques()
+  const plaques = labelRects.value.map((r) => {
+    const l = levelById.value.get(r.levelId)
+    const text = l ? [formatPrice(l.price), tfLabel(l.tf), l.note ?? ''].filter(Boolean).join(' · ') : ''
+    return { top: r.top, height: r.bottom - r.top, text }
+  })
+  return { canvas: c.takeScreenshot(true, false), cssWidth: host.value.clientWidth, plaques }
+}
+
+defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, priceForDrag, screenshot })
 </script>
 
 <template>
