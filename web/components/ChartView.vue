@@ -59,6 +59,8 @@ const UP = '#26a69a'
 const DOWN = '#ef5350'
 /** Start loading older history when fewer than this many bars remain to the left of the viewport. */
 const HISTORY_THRESHOLD_BARS = 30
+/** Right margin after the last bar, in bars (like TradingView's right offset). */
+const RIGHT_OFFSET_BARS = 10
 /** Range-change events fire every frame while panning; check for history at most this often. */
 const HISTORY_CHECK_MS = 500
 
@@ -138,7 +140,10 @@ function fitAll() {
   const c = chart.value
   if (!c) return
   c.priceScale('right').applyOptions({ autoScale: true })
-  c.timeScale().fitContent()
+  // fitContent() drops the right offset; fit explicitly so the gap before the price scale stays.
+  const n = store.get(props.symbol, props.tf)?.candles.length ?? 0
+  if (n) c.timeScale().setVisibleLogicalRange({ from: 0, to: n - 1 + RIGHT_OFFSET_BARS })
+  else c.timeScale().fitContent()
 }
 
 function renderLive() {
@@ -460,7 +465,8 @@ onMounted(() => {
       borderVisible: false,
       timeVisible: true,
       secondsVisible: false,
-      rightOffset: 4,
+      // Empty space between the last bar and the price scale, in bars (user request).
+      rightOffset: RIGHT_OFFSET_BARS,
       // Д/Н fit all loaded bars (A15): allow very narrow bars.
       minBarSpacing: 0.5,
       tickMarkFormatter: formatTick,
