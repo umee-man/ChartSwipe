@@ -43,6 +43,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
   const velocity = new VelocityTracker(cfg.velocityWindowMs)
   let start = { x: 0, y: 0, t: 0 }
   let startTarget: EventTarget | null = null
+  let startIsTouch = false
   let lastTap: Tap | null = null
 
   function reset() {
@@ -64,6 +65,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
 
     start = { x: e.clientX, y: e.clientY, t: e.timeStamp }
     startTarget = e.target
+    startIsTouch = e.pointerType === 'touch'
     velocity.reset()
     velocity.add(e.timeStamp, e.clientY)
 
@@ -91,6 +93,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     if (mode.value === 'pending') {
       const dir = resolveDirection(dx, dy, cfg) // item 3
       if (dir) mode.value = dir
+      if (dir === 'feed') cancelChartLongTap()
     }
     if (mode.value === 'feed') h.onFeedMove(dy)
     blockIfOwned(e)
@@ -123,6 +126,21 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
   }
 
   /**
+   * lightweight-charts arms a 240 ms long-tap timer on touchstart (→ crosshair tracking mode) and
+   * clears it only on its own touchmove/touchcancel. We block its touchmoves during a feed swipe,
+   * so send it a touchcancel (its handler only clears that timer). touchend is deliberately NOT
+   * swallowed: LWC resets its active-touch id there and would ignore every later touch otherwise.
+   */
+  function cancelChartLongTap() {
+    if (startIsTouch && startTarget) startTarget.dispatchEvent(new Event('touchcancel', { bubbles: true }))
+  }
+
+  /** Edge-zone touches (item 6) never reach the chart at all, so LWC never arms anything. */
+  function blockTouchStartIfIgnored(e: Event) {
+    if (mode.value === 'ignored') e.stopPropagation()
+  }
+
+  /**
    * While we own the gesture (undecided, feed, edge zone, level), stop move events in the capture
    * phase so lightweight-charts (which listens on its own canvas) never starts panning.
    */
@@ -138,6 +156,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     ['pointermove', onPointerMove],
     ['pointerup', onPointerEnd],
     ['pointercancel', onPointerEnd],
+    ['touchstart', blockTouchStartIfIgnored],
     ['touchmove', blockIfOwned],
     ['mousemove', blockIfOwned],
   ]

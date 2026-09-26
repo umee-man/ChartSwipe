@@ -17,6 +17,7 @@ const chart = ref<InstanceType<typeof ChartView> | null>(null)
 defineExpose({
   resetView: () => chart.value?.resetView(),
   priceAxisWidth: () => chart.value?.priceAxisWidth() ?? 0,
+  clearCrosshair: () => chart.value?.clearCrosshair(),
 })
 </script>
 

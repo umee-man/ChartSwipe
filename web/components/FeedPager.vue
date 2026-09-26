@@ -19,12 +19,14 @@ const root = ref<HTMLDivElement | null>(null)
 const offset = ref(0)
 const animating = ref(false)
 let animTimer: ReturnType<typeof setTimeout> | null = null
+/** Direction of the running settle animation, committed early if the user grabs the feed again. */
+let pendingDir: -1 | 0 | 1 = 0
 
 const slots = computed(() => domSlots(feed.symbols, feed.currentIndex))
 const hasPrev = computed(() => feed.currentIndex > 0)
 const hasNext = computed(() => feed.currentIndex < feed.symbols.length - 1)
 
-type SlideApi = { resetView: () => void; priceAxisWidth: () => number }
+type SlideApi = { resetView: () => void; priceAxisWidth: () => number; clearCrosshair: () => void }
 const slideRefs = new Map<string, SlideApi>()
 function setSlideRef(symbol: string, el: unknown) {
   if (el) slideRefs.set(symbol, el as SlideApi)
@@ -53,25 +55,33 @@ function settle(dir: -1 | 0 | 1) {
     return
   }
   animating.value = true
+  pendingDir = dir
   offset.value = target
   // transitionend is not guaranteed (e.g. tab hidden) — fall back to a timer.
   animTimer = setTimeout(() => finishAnimation(dir), ANIM_MS + 50)
 }
 
+/** A new gesture/key during the 220 ms settle animation completes it instantly instead of being dropped. */
+function interruptAnimation() {
+  if (animating.value) finishAnimation(pendingDir)
+}
+
 function go(dir: -1 | 1) {
-  if (animating.value) return
+  interruptAnimation()
   settle(dir)
 }
 
 useGestures(root, {
   height,
   onFeedMove(dy) {
-    if (animating.value) return
+    interruptAnimation()
     const atEdge = (dy < 0 && !hasNext.value) || (dy > 0 && !hasPrev.value)
     offset.value = atEdge ? rubberBand(dy) : dy
   },
   onFeedEnd(outcome) {
-    if (animating.value) return
+    interruptAnimation()
+    // A long press before the swipe may have put the chart into crosshair tracking mode.
+    currentSlide()?.clearCrosshair()
     settle(outcome)
   },
   onDoubleTap() {

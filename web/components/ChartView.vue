@@ -9,6 +9,7 @@ import {
   CrosshairMode,
   HistogramSeries,
   TickMarkType,
+  TrackingModeExitMode,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
@@ -36,6 +37,8 @@ const UP_VOL = 'rgba(38,166,154,0.45)'
 const DOWN_VOL = 'rgba(239,83,80,0.45)'
 /** Start loading older history when fewer than this many bars remain to the left of the viewport. */
 const HISTORY_THRESHOLD_BARS = 30
+/** Range-change events fire every frame while panning; check for history at most this often. */
+const HISTORY_CHECK_MS = 500
 
 const { store } = useCandles()
 const host = ref<HTMLDivElement | null>(null)
@@ -44,6 +47,8 @@ const chart = shallowRef<IChartApi | null>(null)
 let candleSeries: ISeriesApi<'Candlestick'> | null = null
 let volumeSeries: ISeriesApi<'Histogram'> | null = null
 let offStore: (() => void) | null = null
+let lastHistoryCheck = 0
+let historyTimer: ReturnType<typeof setTimeout> | null = null
 
 const toBar = (c: Candle): CandlestickData<Time> => ({
   time: c.time as UTCTimestamp,
@@ -115,8 +120,24 @@ function onStoreEvent(e: SeriesEvent) {
   else status.value = store.get(props.symbol, props.tf)?.status ?? 'idle'
 }
 
-function onRangeChange(range: LogicalRange | null) {
+function checkHistory() {
+  lastHistoryCheck = Date.now()
+  const range = chart.value?.timeScale().getVisibleLogicalRange()
   if (range && range.from < HISTORY_THRESHOLD_BARS) void store.loadOlder(props.symbol, props.tf)
+}
+
+/** Throttled (leading + trailing) so panning never turns into a request per frame. */
+function onRangeChange(_range: LogicalRange | null) {
+  if (historyTimer) return
+  const wait = HISTORY_CHECK_MS - (Date.now() - lastHistoryCheck)
+  if (wait <= 0) {
+    checkHistory()
+    return
+  }
+  historyTimer = setTimeout(() => {
+    historyTimer = null
+    checkHistory()
+  }, wait)
 }
 
 function load() {
@@ -130,6 +151,11 @@ function resetView() {
   if (!c) return
   c.priceScale('right').applyOptions({ autoScale: true })
   c.timeScale().resetTimeScale()
+}
+
+/** Hide the crosshair / leave tracking mode (after a feed swipe started on this chart). */
+function clearCrosshair() {
+  chart.value?.clearCrosshairPosition()
 }
 
 /** Width of the right price axis, px (gesture hit-test: vertical drag there scales price). */
@@ -155,6 +181,8 @@ onMounted(() => {
       horzLines: { color: 'rgba(255,255,255,0.04)' },
     },
     crosshair: { mode: CrosshairMode.Normal },
+    // Long-press crosshair must not stick after the finger is lifted (e.g. a swipe that turned into a feed swipe).
+    trackingMode: { exitMode: TrackingModeExitMode.OnTouchEnd },
     rightPriceScale: { borderVisible: false },
     timeScale: {
       borderVisible: false,
@@ -164,8 +192,10 @@ onMounted(() => {
       tickMarkFormatter: formatTick,
     },
     localization: { locale: 'ru-RU', timeFormatter: formatTime },
-    // Feed swipes are decided by useGestures; the chart only pans horizontally by touch.
-    handleScroll: { horzTouchDrag: true, vertTouchDrag: false, pressedMouseMove: true, mouseWheel: true },
+    // Feed swipes are decided by useGestures, which never forwards feed-mode moves to the chart.
+    // vertTouchDrag must stay on: LWC locks a touch drag as horizontal only when 0.5·|dx| > |dy|, so with
+    // it off every 30°–63° "chart" gesture would be dropped. Vertical pan is a no-op while autoScale is on.
+    handleScroll: { horzTouchDrag: true, vertTouchDrag: true, pressedMouseMove: true, mouseWheel: true },
     handleScale: { pinch: true, mouseWheel: true, axisPressedMouseMove: { time: true, price: true } },
   })
   candleSeries = c.addSeries(CandlestickSeries, {
@@ -205,6 +235,7 @@ watch(() => props.tickSize, applyPriceFormat)
 
 onBeforeUnmount(() => {
   offStore?.()
+  if (historyTimer) clearTimeout(historyTimer)
   chart.value?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
   chart.value?.remove() // free canvas + listeners (memory budget, arch §5.2)
   chart.value = null
@@ -212,7 +243,7 @@ onBeforeUnmount(() => {
   volumeSeries = null
 })
 
-defineExpose({ resetView, priceAxisWidth })
+defineExpose({ resetView, priceAxisWidth, clearCrosshair })
 </script>
 
 <template>
