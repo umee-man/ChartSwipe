@@ -44,3 +44,12 @@ export function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
   return Math.min(Math.max(0, index), length - 1)
 }
+
+/**
+ * Feed list with "focused" symbols (opened from the levels list but absent from the current source)
+ * put in front. Focused symbols bypass the hidden filter because the user asked for them explicitly.
+ */
+export function withFocused(list: readonly string[], focused: readonly string[]): string[] {
+  const extra = focused.filter((s) => !list.includes(s))
+  return extra.length ? [...extra, ...list] : [...list]
+}

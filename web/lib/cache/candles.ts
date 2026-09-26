@@ -1,9 +1,12 @@
 // IndexedDB candle cache (arch §5.2): key `binance-f:<symbol>:<tf>`, show cache instantly then fetch tail.
+// Also owns the shared `chartswipe` database handle (levels store: lib/cache/levels.ts).
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Candle, SymbolInfo } from '../binance/types'
+import type { Level } from '../levels/model'
 
 const DB_NAME = 'chartswipe'
-const DB_VERSION = 1
+/** v2: + `levels` object store (keyPath id, index by symbol) for local-first levels (A10). */
+const DB_VERSION = 2
 /** Keep at most this many candles per key on disk (memory budget is handled separately). */
 export const MAX_CACHED_CANDLES = 1500
 /** exchangeInfo is cached for a day (arch §5.4). */
@@ -23,9 +26,10 @@ interface MetaRecord<T = unknown> {
   savedAt: number
 }
 
-interface ChartSwipeDB extends DBSchema {
+export interface ChartSwipeDB extends DBSchema {
   candles: { key: string; value: CandleRecord }
   meta: { key: string; value: MetaRecord }
+  levels: { key: string; value: Level; indexes: { symbol: string } }
 }
 
 /** iOS Safari can leave indexedDB.open() pending forever; give up after this long. */
@@ -51,12 +55,16 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 let dbPromise: Promise<IDBPDatabase<ChartSwipeDB>> | null = null
 
 /** Open (once) the database; resolves to null when unavailable or hanging. */
-async function db(): Promise<IDBPDatabase<ChartSwipeDB> | null> {
+export async function db(): Promise<IDBPDatabase<ChartSwipeDB> | null> {
   if (typeof indexedDB === 'undefined') return null
   dbPromise ??= openDB<ChartSwipeDB>(DB_NAME, DB_VERSION, {
     upgrade(d) {
       if (!d.objectStoreNames.contains('candles')) d.createObjectStore('candles')
       if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta')
+      if (!d.objectStoreNames.contains('levels')) {
+        const store = d.createObjectStore('levels', { keyPath: 'id' })
+        store.createIndex('symbol', 'symbol')
+      }
     },
   }).catch((err) => {
     dbPromise = null

@@ -34,10 +34,7 @@ export const DEFAULT_GESTURE_CONFIG: Readonly<GestureConfig> = Object.freeze({
   velocityWindowMs: 100,
 })
 
-/**
- * What the pointer landed on. `level` and `longPress` are reserved for arch §5.3 items 1–2
- * (they take priority over the feed/chart decision once implemented).
- */
+/** What the pointer landed on; 'level' (a plaque) takes priority over the feed/chart decision (item 1). */
 export type GestureTarget = 'none' | 'priceAxis' | 'level'
 
 /** Gesture mode after arbitration. */
@@ -47,7 +44,8 @@ export type GestureMode =
   | 'feed' // vertical swipe drives the feed
   | 'chart' // horizontal pan / axis scale handled by lightweight-charts
   | 'multi' // pinch (≥ 2 pointers) → chart
-  | 'level' // reserved: dragging a level label (item 1)
+  | 'level' // finger on a level plaque: drag moves it / swipe right deletes (item 1)
+  | 'longpress' // long press fired a new level (item 2); rest of the gesture is swallowed
   | 'ignored' // started in the left-edge dead zone (item 6)
 
 /** Angle of a movement vector from the vertical axis, degrees in [0, 90]. */
@@ -142,4 +140,36 @@ export function isDoubleTap(
   if (!prev) return false
   const dt = cur.t - prev.t
   return dt >= 0 && dt <= cfg.doubleTapMs && Math.hypot(cur.x - prev.x, cur.y - prev.y) <= cfg.doubleTapSlop
+}
+
+// ---------- levels (arch §5.3 items 1–2) ----------
+
+/** Item 2: long press duration that creates a level, ms. */
+export const LONG_PRESS_MS = 400
+/** Item 2: movement that cancels a long press, px. */
+export const LONG_PRESS_SLOP = 8
+/** Item 1: swipe a plaque right by more than this to delete the level, px. */
+export const LEVEL_DELETE_SWIPE = 60
+/** Movement before a plaque drag decides between "move" and "swipe to delete", px. */
+export const LEVEL_LOCK_DISTANCE = 8
+
+/** True once the finger moved too far for a long press. */
+export function exceedsLongPressSlop(dx: number, dy: number, slop = LONG_PRESS_SLOP): boolean {
+  return Math.hypot(dx, dy) > slop
+}
+
+export type LevelDragIntent = 'move' | 'swipe'
+
+/**
+ * Plaque drag intent: rightward and within 30° of horizontal → 'swipe' (delete gesture),
+ * anything else → 'move' (vertical price drag). Null until LEVEL_LOCK_DISTANCE.
+ */
+export function levelDragIntent(dx: number, dy: number, lock = LEVEL_LOCK_DISTANCE): LevelDragIntent | null {
+  if (Math.hypot(dx, dy) < lock) return null
+  return dx > 0 && angleFromVertical(dx, dy) >= 60 ? 'swipe' : 'move'
+}
+
+/** Release of a plaque swipe deletes the level. */
+export function isDeleteSwipe(dx: number, threshold = LEVEL_DELETE_SWIPE): boolean {
+  return dx > threshold
 }

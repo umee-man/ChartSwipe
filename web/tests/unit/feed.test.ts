@@ -98,3 +98,12 @@ describe('virtual window', () => {
     expect(clampIndex(5, 0)).toBe(0)
   })
 })
+
+describe('withFocused (jump from the levels list)', () => {
+  it('prepends focused symbols missing from the source', async () => {
+    const { withFocused } = await import('../../lib/feed/window')
+    expect(withFocused(['A', 'B'], ['X'])).toEqual(['X', 'A', 'B'])
+    expect(withFocused(['A', 'B'], ['B'])).toEqual(['A', 'B'])
+    expect(withFocused(['A'], [])).toEqual(['A'])
+  })
+})
