@@ -1,0 +1,58 @@
+{
+  "kind": "detect",
+  "name": "unclosed_last_flag",
+  "description": "Break at 1; candle 2 would close back below but is unclosed (lastClosed=false) -> event stays pending.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": false,
+  "levels": [
+    {
+      "id": "L",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.6,
+      "high": 100.5,
+      "low": 99.5,
+      "close": 100.3,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 100.3,
+      "high": 100.4,
+      "low": 99.5,
+      "close": 99.6,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 1,
+          "returnIndex": null,
+          "status": "pending",
+          "breakTime": 1790381100,
+          "returnTime": null
+        }
+      ],
+      "falseCount": 0
+    }
+  ]
+}

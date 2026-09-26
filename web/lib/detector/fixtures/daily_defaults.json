@@ -1,0 +1,87 @@
+{
+  "kind": "detect",
+  "name": "daily_defaults",
+  "description": "1d defaults (pct 0.3% -> X=0.3, N=1, no ATR). 1: wick up, close below -> false on itself. 2: outside candle (100.9 / 99.6): up penetration 0.6 > down 0.1 -> up-break closing above -> true. 3: down-break closing below -> true. 4 is unclosed (lastClosed=false) and ignored.",
+  "tf": "1d",
+  "lastClosed": false,
+  "levels": [
+    {
+      "id": "PDH",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99,
+      "high": 99.8,
+      "low": 98.5,
+      "close": 99.5,
+      "volume": 1
+    },
+    {
+      "time": 1790467200,
+      "open": 99.5,
+      "high": 101,
+      "low": 99.2,
+      "close": 99.8,
+      "volume": 1
+    },
+    {
+      "time": 1790553600,
+      "open": 99.8,
+      "high": 100.9,
+      "low": 99.6,
+      "close": 100.6,
+      "volume": 1
+    },
+    {
+      "time": 1790640000,
+      "open": 100.2,
+      "high": 100.25,
+      "low": 99.1,
+      "close": 99.3,
+      "volume": 1
+    },
+    {
+      "time": 1790726400,
+      "open": 99.3,
+      "high": 101.5,
+      "low": 99.2,
+      "close": 101,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "PDH",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 1,
+          "returnIndex": 1,
+          "status": "false",
+          "breakTime": 1790467200,
+          "returnTime": 1790467200
+        },
+        {
+          "direction": "up",
+          "breakIndex": 2,
+          "returnIndex": null,
+          "status": "true",
+          "breakTime": 1790553600,
+          "returnTime": null
+        },
+        {
+          "direction": "down",
+          "breakIndex": 3,
+          "returnIndex": null,
+          "status": "true",
+          "breakTime": 1790640000,
+          "returnTime": null
+        }
+      ],
+      "falseCount": 1
+    }
+  ]
+}

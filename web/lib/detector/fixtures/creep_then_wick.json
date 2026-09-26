@@ -1,0 +1,58 @@
+{
+  "kind": "detect",
+  "name": "creep_then_wick",
+  "description": "X=0.1. Candle 1 closes at 100.05 (above the level, inside X; high 100.08 is no break). Candle 2 wicks to 100.6 and to 99.7 and closes at 99.8. Both thresholds are crossed; up penetration 0.5 > down 0.2 -> up, false on the break candle itself.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "L",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.6,
+      "high": 100.08,
+      "low": 99.55,
+      "close": 100.05,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 100.05,
+      "high": 100.6,
+      "low": 99.7,
+      "close": 99.8,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 2,
+          "returnIndex": 2,
+          "status": "false",
+          "breakTime": 1790381400,
+          "returnTime": 1790381400
+        }
+      ],
+      "falseCount": 1
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "kind": "detect",
+  "name": "return_on_break_candle",
+  "description": "Candle 1 wicks to 100.8 (> 100.1) but closes at 99.7 < 100 -> false with returnIndex = breakIndex = 1.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "L",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.6,
+      "high": 100.8,
+      "low": 99.5,
+      "close": 99.7,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 99.7,
+      "high": 99.9,
+      "low": 99.4,
+      "close": 99.5,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 1,
+          "returnIndex": 1,
+          "status": "false",
+          "breakTime": 1790381100,
+          "returnTime": 1790381100
+        }
+      ],
+      "falseCount": 1
+    }
+  ]
+}

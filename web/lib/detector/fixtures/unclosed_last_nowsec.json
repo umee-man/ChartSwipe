@@ -1,0 +1,49 @@
+{
+  "kind": "detect",
+  "name": "unclosed_last_nowsec",
+  "description": "Candle 2 opened at T0+600 and is still open at nowSec=T0+700 -> ignored, so its break does not count.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "nowSec": 1790381500,
+  "levels": [
+    {
+      "id": "L",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.6,
+      "high": 99.9,
+      "low": 99.4,
+      "close": 99.7,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 99.7,
+      "high": 100.8,
+      "low": 99.6,
+      "close": 100.5,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [],
+      "falseCount": 0
+    }
+  ]
+}

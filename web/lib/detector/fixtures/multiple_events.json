@@ -1,0 +1,165 @@
+{
+  "kind": "detect",
+  "name": "multiple_events",
+  "description": "N=3, X=0.1. Level 100: false (1->1), false (3->4), true (5, resolved 7), down false (8->9). Candle 10 cannot re-break up (previous close above). Levels 95/105 are never crossed -> no events.",
+  "tf": "5m",
+  "params": {
+    "k": 0,
+    "n": 3
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "L100",
+      "price": 100
+    },
+    {
+      "id": "L95",
+      "price": 95
+    },
+    {
+      "id": "L105",
+      "price": 105
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.6,
+      "high": 100.4,
+      "low": 99.5,
+      "close": 99.8,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 99.8,
+      "high": 99.9,
+      "low": 99.6,
+      "close": 99.7,
+      "volume": 1
+    },
+    {
+      "time": 1790381700,
+      "open": 99.7,
+      "high": 100.5,
+      "low": 99.6,
+      "close": 100.3,
+      "volume": 1
+    },
+    {
+      "time": 1790382000,
+      "open": 100.3,
+      "high": 100.4,
+      "low": 99.7,
+      "close": 99.9,
+      "volume": 1
+    },
+    {
+      "time": 1790382300,
+      "open": 99.9,
+      "high": 100.6,
+      "low": 99.8,
+      "close": 100.4,
+      "volume": 1
+    },
+    {
+      "time": 1790382600,
+      "open": 100.4,
+      "high": 100.8,
+      "low": 100.2,
+      "close": 100.6,
+      "volume": 1
+    },
+    {
+      "time": 1790382900,
+      "open": 100.6,
+      "high": 100.9,
+      "low": 100.3,
+      "close": 100.7,
+      "volume": 1
+    },
+    {
+      "time": 1790383200,
+      "open": 100.7,
+      "high": 100.8,
+      "low": 99.8,
+      "close": 99.9,
+      "volume": 1
+    },
+    {
+      "time": 1790383500,
+      "open": 99.9,
+      "high": 100.3,
+      "low": 99.7,
+      "close": 100.2,
+      "volume": 1
+    },
+    {
+      "time": 1790383800,
+      "open": 100.2,
+      "high": 100.3,
+      "low": 100,
+      "close": 100.1,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L100",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 1,
+          "returnIndex": 1,
+          "status": "false",
+          "breakTime": 1790381100,
+          "returnTime": 1790381100
+        },
+        {
+          "direction": "up",
+          "breakIndex": 3,
+          "returnIndex": 4,
+          "status": "false",
+          "breakTime": 1790381700,
+          "returnTime": 1790382000
+        },
+        {
+          "direction": "up",
+          "breakIndex": 5,
+          "returnIndex": null,
+          "status": "true",
+          "breakTime": 1790382300,
+          "returnTime": null
+        },
+        {
+          "direction": "down",
+          "breakIndex": 8,
+          "returnIndex": 9,
+          "status": "false",
+          "breakTime": 1790383200,
+          "returnTime": 1790383500
+        }
+      ],
+      "falseCount": 3
+    },
+    {
+      "levelId": "L95",
+      "events": [],
+      "falseCount": 0
+    },
+    {
+      "levelId": "L105",
+      "events": [],
+      "falseCount": 0
+    }
+  ]
+}

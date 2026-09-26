@@ -1,0 +1,109 @@
+{
+  "kind": "detect",
+  "name": "active_from",
+  "description": "X=0.1. Candle 1 wicks above and closes back (false), candle 4 breaks, candle 5 closes back (false). LATE is active from candle 3 -> only the second event; ALWAYS has no activeFrom -> both.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "LATE",
+      "price": 100,
+      "activeFrom": 1790381700
+    },
+    {
+      "id": "ALWAYS",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.6,
+      "high": 100.5,
+      "low": 99.5,
+      "close": 99.7,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 99.7,
+      "high": 99.9,
+      "low": 99.5,
+      "close": 99.6,
+      "volume": 1
+    },
+    {
+      "time": 1790381700,
+      "open": 99.6,
+      "high": 99.9,
+      "low": 99.4,
+      "close": 99.7,
+      "volume": 1
+    },
+    {
+      "time": 1790382000,
+      "open": 99.7,
+      "high": 100.6,
+      "low": 99.6,
+      "close": 100.3,
+      "volume": 1
+    },
+    {
+      "time": 1790382300,
+      "open": 100.3,
+      "high": 100.4,
+      "low": 99.5,
+      "close": 99.6,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "LATE",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 4,
+          "returnIndex": 5,
+          "status": "false",
+          "breakTime": 1790382000,
+          "returnTime": 1790382300
+        }
+      ],
+      "falseCount": 1
+    },
+    {
+      "levelId": "ALWAYS",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 1,
+          "returnIndex": 1,
+          "status": "false",
+          "breakTime": 1790381100,
+          "returnTime": 1790381100
+        },
+        {
+          "direction": "up",
+          "breakIndex": 4,
+          "returnIndex": 5,
+          "status": "false",
+          "breakTime": 1790382000,
+          "returnTime": 1790382300
+        }
+      ],
+      "falseCount": 2
+    }
+  ]
+}

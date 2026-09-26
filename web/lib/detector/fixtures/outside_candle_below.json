@@ -1,0 +1,50 @@
+{
+  "kind": "detect",
+  "name": "outside_candle_below",
+  "description": "X=0.1. Ref 99.95 (inside the band). Candle 1 wicks to 100.3 (up penetration 0.2) and 99.4 (down penetration 0.5), closes at 100.2 -> down, close back above -> false on itself.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "L",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.8,
+      "low": 99.3,
+      "close": 99.95,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 99.95,
+      "high": 100.3,
+      "low": 99.4,
+      "close": 100.2,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [
+        {
+          "direction": "down",
+          "breakIndex": 1,
+          "returnIndex": 1,
+          "status": "false",
+          "breakTime": 1790381100,
+          "returnTime": 1790381100
+        }
+      ],
+      "falseCount": 1
+    }
+  ]
+}

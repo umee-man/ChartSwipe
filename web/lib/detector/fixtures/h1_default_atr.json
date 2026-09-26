@@ -1,0 +1,179 @@
+{
+  "kind": "detect",
+  "name": "h1_default_atr",
+  "description": "1h defaults (pct 0.15% -> 1.5, k=0.3, N=3), level 1000. Candle 14 (high 1002) is above the pct threshold but below the ATR threshold 1003 -> no break. Candle 15 breaks (1004 > 1003.064); 15..17 close above -> true.",
+  "tf": "1h",
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "L",
+      "price": 1000
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790384400,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790388000,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790391600,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790395200,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790398800,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790402400,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790406000,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790409600,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790413200,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790416800,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790420400,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790424000,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790427600,
+      "open": 990,
+      "high": 995,
+      "low": 985,
+      "close": 990,
+      "volume": 1
+    },
+    {
+      "time": 1790431200,
+      "open": 990,
+      "high": 1002,
+      "low": 989,
+      "close": 999,
+      "volume": 1
+    },
+    {
+      "time": 1790434800,
+      "open": 999,
+      "high": 1004,
+      "low": 998,
+      "close": 1002,
+      "volume": 1
+    },
+    {
+      "time": 1790438400,
+      "open": 1002,
+      "high": 1005,
+      "low": 1001,
+      "close": 1003,
+      "volume": 1
+    },
+    {
+      "time": 1790442000,
+      "open": 1003,
+      "high": 1006,
+      "low": 1002,
+      "close": 1004,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 15,
+          "returnIndex": null,
+          "status": "true",
+          "breakTime": 1790434800,
+          "returnTime": null
+        }
+      ],
+      "falseCount": 0
+    }
+  ],
+  "expectedAtr": {
+    "13": 10,
+    "14": 10.214285714285714
+  }
+}

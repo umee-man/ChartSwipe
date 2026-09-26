@@ -1,0 +1,194 @@
+{
+  "kind": "detect",
+  "name": "level_far_below",
+  "description": "20 candles oscillating around 110 (close 110). Level 100 is far below and level 120 far above: every candle is beyond the threshold on one side but never crosses it -> no events.",
+  "tf": "5m",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "BELOW",
+      "price": 100
+    },
+    {
+      "id": "ABOVE",
+      "price": 120
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790381100,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790381400,
+      "open": 110,
+      "high": 110.7,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790381700,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790382000,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790382300,
+      "open": 110,
+      "high": 110.7,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790382600,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790382900,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790383200,
+      "open": 110,
+      "high": 110.7,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790383500,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790383800,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790384100,
+      "open": 110,
+      "high": 110.7,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790384400,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790384700,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790385000,
+      "open": 110,
+      "high": 110.7,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790385300,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790385600,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790385900,
+      "open": 110,
+      "high": 110.7,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790386200,
+      "open": 110,
+      "high": 110.5,
+      "low": 109.5,
+      "close": 110,
+      "volume": 1
+    },
+    {
+      "time": 1790386500,
+      "open": 110,
+      "high": 110.6,
+      "low": 109.4,
+      "close": 110,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "BELOW",
+      "events": [],
+      "falseCount": 0
+    },
+    {
+      "levelId": "ABOVE",
+      "events": [],
+      "falseCount": 0
+    }
+  ]
+}

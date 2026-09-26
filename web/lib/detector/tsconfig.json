@@ -1,0 +1,15 @@
+{
+  // Standalone config for the pure detector module: lets it be type-checked and tested
+  // without the generated web/.nuxt/tsconfig.json. Mirrors web/tsconfig.json strictness.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  },
+  "include": ["./**/*.ts"]
+}

@@ -1,0 +1,139 @@
+{
+  "kind": "autoLevels",
+  "name": "auto_levels",
+  "description": "Daily candles Mon 2026-09-14 .. Sat 2026-09-26; nowSec = Sat 26 01:00 UTC so the last candle is unclosed. PDH/PDL from Fri 25; PWH/PWL from Mon 14..Sun 20.",
+  "nowSec": 1790384400,
+  "weekly": true,
+  "candles": [
+    {
+      "time": 1789344000,
+      "open": 105,
+      "high": 110,
+      "low": 100,
+      "close": 105,
+      "volume": 1
+    },
+    {
+      "time": 1789430400,
+      "open": 106.5,
+      "high": 112,
+      "low": 101,
+      "close": 106.5,
+      "volume": 1
+    },
+    {
+      "time": 1789516800,
+      "open": 109.5,
+      "high": 115,
+      "low": 104,
+      "close": 109.5,
+      "volume": 1
+    },
+    {
+      "time": 1789603200,
+      "open": 105,
+      "high": 111,
+      "low": 99,
+      "close": 105,
+      "volume": 1
+    },
+    {
+      "time": 1789689600,
+      "open": 102.5,
+      "high": 108,
+      "low": 97,
+      "close": 102.5,
+      "volume": 1
+    },
+    {
+      "time": 1789776000,
+      "open": 103.5,
+      "high": 109,
+      "low": 98,
+      "close": 103.5,
+      "volume": 1
+    },
+    {
+      "time": 1789862400,
+      "open": 104.5,
+      "high": 110,
+      "low": 99,
+      "close": 104.5,
+      "volume": 1
+    },
+    {
+      "time": 1789948800,
+      "open": 111.5,
+      "high": 118,
+      "low": 105,
+      "close": 111.5,
+      "volume": 1
+    },
+    {
+      "time": 1790035200,
+      "open": 111,
+      "high": 116,
+      "low": 106,
+      "close": 111,
+      "volume": 1
+    },
+    {
+      "time": 1790121600,
+      "open": 112.5,
+      "high": 117,
+      "low": 108,
+      "close": 112.5,
+      "volume": 1
+    },
+    {
+      "time": 1790208000,
+      "open": 114.5,
+      "high": 119,
+      "low": 110,
+      "close": 114.5,
+      "volume": 1
+    },
+    {
+      "time": 1790294400,
+      "open": 115.5,
+      "high": 120,
+      "low": 111,
+      "close": 115.5,
+      "volume": 1
+    },
+    {
+      "time": 1790380800,
+      "open": 107.5,
+      "high": 125,
+      "low": 90,
+      "close": 107.5,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "id": "PDH",
+      "kind": "PDH",
+      "price": 120,
+      "activeFrom": 1790380800
+    },
+    {
+      "id": "PDL",
+      "kind": "PDL",
+      "price": 111,
+      "activeFrom": 1790380800
+    },
+    {
+      "id": "PWH",
+      "kind": "PWH",
+      "price": 115,
+      "activeFrom": 1789948800
+    },
+    {
+      "id": "PWL",
+      "kind": "PWL",
+      "price": 97,
+      "activeFrom": 1789948800
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "kind": "detect",
+  "name": "true_breakout",
+  "description": "1h, N=3, X=0.15: break at 1, candles 1..3 close above -> true (resolved at 3). Candles 4-5 stay above: no new up-break because the previous close is above the level.",
+  "tf": "1h",
+  "params": {
+    "k": 0
+  },
+  "lastClosed": true,
+  "levels": [
+    {
+      "id": "L",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1790380800,
+      "open": 99.5,
+      "high": 99.9,
+      "low": 99.4,
+      "close": 99.8,
+      "volume": 1
+    },
+    {
+      "time": 1790384400,
+      "open": 99.8,
+      "high": 100.6,
+      "low": 99.7,
+      "close": 100.4,
+      "volume": 1
+    },
+    {
+      "time": 1790388000,
+      "open": 100.4,
+      "high": 100.9,
+      "low": 100.2,
+      "close": 100.7,
+      "volume": 1
+    },
+    {
+      "time": 1790391600,
+      "open": 100.7,
+      "high": 101.2,
+      "low": 100.5,
+      "close": 101,
+      "volume": 1
+    },
+    {
+      "time": 1790395200,
+      "open": 101,
+      "high": 101.3,
+      "low": 100.8,
+      "close": 101.1,
+      "volume": 1
+    },
+    {
+      "time": 1790398800,
+      "open": 101.1,
+      "high": 101.5,
+      "low": 100.9,
+      "close": 101.2,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "L",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 1,
+          "returnIndex": null,
+          "status": "true",
+          "breakTime": 1790384400,
+          "returnTime": null
+        }
+      ],
+      "falseCount": 0
+    }
+  ]
+}
