@@ -22,6 +22,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { Candle, Interval } from '~/lib/binance/types'
 import { tickDecimals } from '~/lib/binance/parse'
 import { lastCandle } from '~/lib/candles/merge'
+import { opensZoomedOut } from '~/lib/feed/tf'
 import type { SeriesEvent, SeriesStatus } from '~/lib/candles/store'
 import { useCandles } from '~/composables/useCandles'
 
@@ -50,6 +51,11 @@ let candleSeries: ISeriesApi<'Candlestick'> | null = null
 let volumeSeries: ISeriesApi<'Histogram'> | null = null
 let offStore: (() => void) | null = null
 let lastHistoryCheck = 0
+/**
+ * Д/Н open fully zoomed out (A15): fit every loaded bar until fresh network data has been drawn
+ * (cache first, then the REST tail), then leave the view to the user.
+ */
+let fitPending = false
 let historyTimer: ReturnType<typeof setTimeout> | null = null
 
 const toBar = (c: Candle): CandlestickData<Time> => ({
@@ -103,6 +109,18 @@ function renderAll() {
   const candles = s?.candles ?? []
   candleSeries?.setData(candles.map(toBar))
   volumeSeries?.setData(candles.map(toVol))
+  if (fitPending && candles.length) {
+    fitAll()
+    if (s?.fetchedAt) fitPending = false
+  }
+}
+
+/** All loaded candles fit the width, price scale auto-fits the visible range. */
+function fitAll() {
+  const c = chart.value
+  if (!c) return
+  c.priceScale('right').applyOptions({ autoScale: true })
+  c.timeScale().fitContent()
 }
 
 function renderLive() {
@@ -131,7 +149,12 @@ function onStoreEvent(e: SeriesEvent) {
 function checkHistory() {
   lastHistoryCheck = Date.now()
   const range = chart.value?.timeScale().getVisibleLogicalRange()
-  if (range && range.from < HISTORY_THRESHOLD_BARS) void store.loadOlder(props.symbol, props.tf)
+  if (!range || range.from >= HISTORY_THRESHOLD_BARS) return
+  // Fully zoomed-out Д/Н view already shows everything loaded: don't page history just because the
+  // left edge is visible (it would immediately break "all candles fit"). Paging resumes once zoomed in.
+  const count = store.get(props.symbol, props.tf)?.candles.length ?? 0
+  if (opensZoomedOut(props.tf) && range.from <= 0 && range.to >= count - 1) return
+  void store.loadOlder(props.symbol, props.tf)
 }
 
 /** Throttled (leading + trailing) so panning never turns into a request per frame. */
@@ -149,14 +172,22 @@ function onRangeChange(_range: LogicalRange | null) {
 }
 
 function load() {
+  fitPending = opensZoomedOut(props.tf)
   renderAll() // instant from memory/cache if present
   void store.ensure(props.symbol, props.tf)
 }
 
-/** Double tap (arch §5.3 item 5): back to the latest bars with auto price scale. */
+/**
+ * Double tap (arch §5.3 item 5): Д/Н → the fully zoomed-out view (A15);
+ * 5м/1ч → back to the latest bars with auto price scale.
+ */
 function resetView() {
   const c = chart.value
   if (!c) return
+  if (opensZoomedOut(props.tf)) {
+    fitAll()
+    return
+  }
   c.priceScale('right').applyOptions({ autoScale: true })
   c.timeScale().resetTimeScale()
 }
@@ -197,6 +228,8 @@ onMounted(() => {
       timeVisible: true,
       secondsVisible: false,
       rightOffset: 4,
+      // Д/Н fit all loaded bars (A15): allow very narrow bars.
+      minBarSpacing: 0.5,
       tickMarkFormatter: formatTick,
     },
     localization: { locale: 'ru-RU', timeFormatter: formatTime },
@@ -232,7 +265,7 @@ watch(
   () => props.tf,
   () => {
     load()
-    chart.value?.timeScale().scrollToRealTime()
+    if (!opensZoomedOut(props.tf)) chart.value?.timeScale().scrollToRealTime()
   },
 )
 watch(

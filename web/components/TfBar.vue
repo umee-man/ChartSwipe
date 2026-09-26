@@ -1,17 +1,10 @@
 <script setup lang="ts">
-// Bottom timeframe bar, 64 px in the thumb zone (F3). Switching only changes the active TF;
-// ChartView redraws from memory (arch §5.2, < 100 ms).
-import type { Interval } from '~/lib/binance/types'
+// Bottom timeframe bar, 64 px in the thumb zone (F3). 4 buttons by default: 5м · 1ч · Д · Н (A15).
+// Switching only changes the active TF; ChartView redraws from memory (arch §5.2, < 100 ms).
+import { tfLabel as label } from '~/lib/feed/tf'
 import { useSettingsStore } from '~/stores/settings'
 
 const settings = useSettingsStore()
-
-const LABELS: Partial<Record<Interval, string>> = {
-  '1m': '1м', '3m': '3м', '5m': '5м', '15m': '15м', '30m': '30м',
-  '1h': '1ч', '2h': '2ч', '4h': '4ч', '6h': '6ч', '8h': '8ч', '12h': '12ч',
-  '1d': 'Д', '3d': '3Д', '1w': 'Н', '1M': 'М',
-}
-const label = (tf: Interval) => LABELS[tf] ?? tf
 </script>
 
 <template>
@@ -34,7 +27,8 @@ const label = (tf: Interval) => LABELS[tf] ?? tf
 .tf-bar {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
   gap: 8px;
   height: var(--tfbar-h);
   padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));

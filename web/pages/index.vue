@@ -30,9 +30,11 @@ watch(
     if (settleTimer) clearTimeout(settleTimer)
     settleTimer = setTimeout(() => {
       const cur = list[index]
-      // Current ticker: all 3 TFs in parallel so TF switches are instant (F3).
+      // Current ticker: all TF buttons (4 since A15) in parallel so TF switches are instant (F3).
+      // Budget: klines limit 300 = weight 2; a new stop adds ~1 new ticker × 4 TFs = 8 weight
+      // (neighbours are mostly cached already) — far below the 2400/min IP limit. Memory: ±3 tickers × 4 TFs.
       if (cur) candles.preload([cur], settings.tfButtons)
-      // Then the 2 next tickers, all TFs.
+      // Then the 2 next tickers, all TFs (incl. Н).
       candles.preload(preloadSymbols(list, index), settings.tfButtons)
     }, SETTLE_MS)
   },
