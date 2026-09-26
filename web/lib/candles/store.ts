@@ -1,9 +1,11 @@
 // In-memory candle repository (framework-free). Holds candles for the ±3 ticker window (arch §5.2),
 // hydrates from IndexedDB first, then fetches the fresh tail; pages history to the left on demand.
-import { describeError, fetchKlines, KLINES_LIMIT, rateLimitGate } from '../binance/rest'
+// A20: Д/Н load 1500 bars; Д pages back to the listing start (completeHistory); revisits fetch only the tail.
+import { describeError, fetchKlines, rateLimitGate } from '../binance/rest'
 import type { Candle, Interval } from '../binance/types'
 import { readCandles, writeCandles } from '../cache/candles'
 import { applyLiveCandle, intervalSeconds, mergeCandles, mergeFreshTail } from './merge'
+import { initialLimit, KLINES_DEFAULT_LIMIT, pageUntilStart, pagesToListingStart, tailLimit } from './policy'
 
 export type SeriesStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -23,7 +25,8 @@ export interface SeriesState {
   olderFailures: number
 }
 
-export type SeriesEventKind = 'reset' | 'live' | 'prepend' | 'status'
+/** 'full' = history now reaches the listing start (Д, A20): redraw and re-fit the zoomed-out view. */
+export type SeriesEventKind = 'reset' | 'live' | 'prepend' | 'status' | 'full'
 
 export interface SeriesEvent {
   symbol: string
@@ -108,31 +111,51 @@ export class CandleStore {
     if (!this.map.has(key)) this.map.set(key, s)
   }
 
+  private async readCache(s: SeriesState): Promise<void> {
+    s.status = 'loading'
+    this.emit(s, 'status')
+    const cached = await readCandles(s.symbol, s.tf)
+    this.reattach(s)
+    if (cached && s.candles.length === 0) {
+      s.candles = cached.candles
+      s.historyExhausted = cached.complete
+      s.status = 'ready'
+      this.emit(s, 'reset')
+    }
+  }
+
   private async load(symbol: string, tf: Interval): Promise<SeriesState> {
     const s = this.state(symbol, tf)
-    // Network starts right away, in parallel with the (possibly slow) IndexedDB read.
-    const freshP = fetchKlines({ symbol, interval: tf, limit: KLINES_LIMIT })
-    freshP.catch(() => {}) // handled below; avoid an unhandled rejection while awaiting the cache
-    if (s.candles.length === 0) {
-      s.status = 'loading'
-      this.emit(s, 'status')
-      const cached = await readCandles(symbol, tf)
-      this.reattach(s)
-      if (cached?.length && s.candles.length === 0) {
-        s.candles = cached
-        s.status = 'ready'
-        this.emit(s, 'reset')
-      }
+    const interval = intervalSeconds(tf)
+    const bigPage = initialLimit(tf) > KLINES_DEFAULT_LIMIT
+    let freshP: Promise<Candle[]>
+    if (bigPage) {
+      // Д/Н: the first page is 1500 bars (weight 10). Read the cache first so a revisit only fetches
+      // the tail (IndexedDB is guarded by a 500 ms timeout).
+      if (s.candles.length === 0) await this.readCache(s)
+      const last = s.candles[s.candles.length - 1]
+      const limit = last ? tailLimit(last.time, Date.now() / 1000, interval, initialLimit(tf)) : initialLimit(tf)
+      freshP = fetchKlines({ symbol, interval: tf, limit })
+    } else {
+      // 5м/1ч: network starts right away, in parallel with the (possibly slow) IndexedDB read.
+      freshP = fetchKlines({ symbol, interval: tf, limit: initialLimit(tf) })
+      freshP.catch(() => {}) // handled below; avoid an unhandled rejection while awaiting the cache
+      if (s.candles.length === 0) await this.readCache(s)
     }
     try {
       const fresh = await freshP
       this.reattach(s)
-      s.candles = mergeFreshTail(s.candles, fresh, intervalSeconds(tf))
+      const hadCache = s.candles.length > 0
+      s.candles = mergeFreshTail(s.candles, fresh, interval)
+      // A fresh-only series shorter than the requested page already starts at the listing (A20).
+      const fromScratch = !hadCache || s.candles[0]!.time === fresh[0]?.time
+      if (fromScratch && fresh.length < initialLimit(tf)) s.historyExhausted = true
+      if (fromScratch && fresh.length >= initialLimit(tf)) s.historyExhausted = false
       s.fetchedAt = Date.now()
       s.status = 'ready'
       s.error = null
       this.emit(s, 'reset')
-      void writeCandles(symbol, tf, s.candles)
+      void writeCandles(symbol, tf, s.candles, s.historyExhausted)
     } catch (err) {
       this.reattach(s)
       s.error = describeError(err)
@@ -151,7 +174,7 @@ export class CandleStore {
     s.loadingOlder = true
     try {
       const first = s.candles[0]!.time
-      const page = await fetchKlines({ symbol, interval: tf, limit: KLINES_LIMIT, endTime: first * 1000 - 1 })
+      const page = await fetchKlines({ symbol, interval: tf, limit: initialLimit(tf), endTime: first * 1000 - 1 })
       const older = page.filter((c) => c.time < first)
       if (older.length === 0) {
         s.historyExhausted = true
@@ -161,14 +184,50 @@ export class CandleStore {
       s.candles = mergeCandles(older, s.candles)
       const added = s.candles.length - before
       s.olderFailures = 0
+      if (page.length < initialLimit(tf)) s.historyExhausted = true
       this.emit(s, 'prepend', added)
-      void writeCandles(symbol, tf, s.candles)
+      void writeCandles(symbol, tf, s.candles, s.historyExhausted)
       return added
     } catch {
       s.olderFailures++
       // Never hammer the API: back off per series, and at least until the global 429 gate opens.
       s.olderRetryAt = Date.now() + Math.max(olderRetryDelay(s.olderFailures), rateLimitGate.remaining())
       return 0
+    } finally {
+      s.loadingOlder = false
+    }
+  }
+
+  /**
+   * Д (A20): page back sequentially (1500 bars per request, weight 10) until the listing start, then
+   * emit 'full' so the zoomed-out chart re-fits to the whole history. Called for the chart on screen
+   * only; errors / the 429 gate back off like loadOlder. Resolves true when history is complete.
+   */
+  async completeHistory(symbol: string, tf: Interval): Promise<boolean> {
+    const s = this.map.get(seriesKey(symbol, tf))
+    if (!s || !pagesToListingStart(tf) || !s.fetchedAt || s.candles.length === 0) return false
+    if (s.historyExhausted) return true
+    if (s.loadingOlder || Date.now() < s.olderRetryAt) return false
+    s.loadingOlder = true
+    try {
+      const limit = initialLimit(tf)
+      const r = await pageUntilStart(
+        (endTime) => fetchKlines({ symbol, interval: tf, limit, endTime }),
+        s.candles,
+        limit,
+      )
+      this.reattach(s)
+      // Live bars may have arrived meanwhile: current memory wins on overlap.
+      s.candles = mergeCandles(r.candles, s.candles)
+      s.historyExhausted = r.complete
+      s.olderFailures = 0
+      if (r.pages) this.emit(s, 'full')
+      void writeCandles(symbol, tf, s.candles, s.historyExhausted)
+      return r.complete
+    } catch {
+      s.olderFailures++
+      s.olderRetryAt = Date.now() + Math.max(olderRetryDelay(s.olderFailures), rateLimitGate.remaining())
+      return false
     } finally {
       s.loadingOlder = false
     }
@@ -197,7 +256,7 @@ export class CandleStore {
   retain(keep: ReadonlySet<string>): void {
     for (const [key, s] of this.map) {
       if (keep.has(s.symbol) || this.inflight.has(key) || s.loadingOlder) continue
-      if (s.candles.length) void writeCandles(s.symbol, s.tf, s.candles)
+      if (s.candles.length) void writeCandles(s.symbol, s.tf, s.candles, s.historyExhausted)
       this.map.delete(key)
     }
   }

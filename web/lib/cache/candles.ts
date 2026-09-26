@@ -7,8 +7,8 @@ import type { Level } from '../levels/model'
 const DB_NAME = 'chartswipe'
 /** v2: + `levels` object store (keyPath id, index by symbol) for local-first levels (A10). */
 const DB_VERSION = 2
-/** Keep at most this many candles per key on disk (memory budget is handled separately). */
-export const MAX_CACHED_CANDLES = 1500
+/** Keep at most this many candles per key on disk: Д keeps its full history (A20, BTC ≈ 2500 days). */
+export const MAX_CACHED_CANDLES = 4000
 /** exchangeInfo is cached for a day (arch §5.4). */
 export const EXCHANGE_INFO_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -19,6 +19,13 @@ export function candleCacheKey(symbol: string, tf: string): string {
 interface CandleRecord {
   candles: Candle[]
   savedAt: number
+  /** History reaches the listing start (Д paged back, A20) — no need to page again on revisit. */
+  complete?: boolean
+}
+
+export interface CachedCandles {
+  candles: Candle[]
+  complete: boolean
 }
 
 interface MetaRecord<T = unknown> {
@@ -74,22 +81,23 @@ export async function db(): Promise<IDBPDatabase<ChartSwipeDB> | null> {
 }
 
 /** Cache failures must never break the feed: every call degrades to a no-op. */
-export async function readCandles(symbol: string, tf: string): Promise<Candle[] | null> {
+export async function readCandles(symbol: string, tf: string): Promise<CachedCandles | null> {
   try {
     const d = await db()
     const rec = await d?.get('candles', candleCacheKey(symbol, tf))
-    return rec?.candles ?? null
+    return rec?.candles?.length ? { candles: rec.candles, complete: !!rec.complete } : null
   } catch {
     return null
   }
 }
 
-export async function writeCandles(symbol: string, tf: string, candles: readonly Candle[]): Promise<void> {
+export async function writeCandles(symbol: string, tf: string, candles: readonly Candle[], complete = false): Promise<void> {
   try {
     const d = await db()
     if (!d) return
-    const tail = candles.length > MAX_CACHED_CANDLES ? candles.slice(-MAX_CACHED_CANDLES) : [...candles]
-    await d.put('candles', { candles: tail, savedAt: Date.now() }, candleCacheKey(symbol, tf))
+    const trimmed = candles.length > MAX_CACHED_CANDLES
+    const tail = trimmed ? candles.slice(-MAX_CACHED_CANDLES) : [...candles]
+    await d.put('candles', { candles: tail, savedAt: Date.now(), complete: complete && !trimmed }, candleCacheKey(symbol, tf))
   } catch {
     // quota / private mode — ignore
   }

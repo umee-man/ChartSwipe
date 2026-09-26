@@ -129,6 +129,7 @@ function renderAll() {
   syncStatus()
   const candles = s?.candles ?? []
   priceSeries?.setData(candles.map(toBar))
+  drawnCount = candles.length
   volumeSeries?.setData(candles.map(toVol))
   if (fitPending && candles.length) {
     fitAll()
@@ -162,12 +163,43 @@ function renderPrepend(added: number) {
   if (ts && range) ts.setVisibleLogicalRange({ from: range.from + added, to: range.to + added })
 }
 
+/** True when the view shows every bar that was loaded before this update (the Д/Н overview). */
+function isShowingAll(countBefore: number): boolean {
+  const range = chart.value?.timeScale().getVisibleLogicalRange()
+  return !!range && range.from <= 1 && range.to >= countBefore - 2
+}
+
+/**
+ * Д history reached the listing start (A20): redraw everything and, if the user is still looking at the
+ * zoomed-out overview, re-fit it to the whole history (keeps the right offset); otherwise keep their view.
+ */
+function renderFull(countBefore: number) {
+  const refit = fitPending || isShowingAll(countBefore)
+  const ts = chart.value?.timeScale()
+  const range = ts?.getVisibleLogicalRange()
+  const added = (store.get(props.symbol, props.tf)?.candles.length ?? 0) - countBefore
+  renderAll()
+  if (refit) fitAll()
+  else if (ts && range && added > 0) ts.setVisibleLogicalRange({ from: range.from + added, to: range.to + added })
+}
+
+/** Bars currently drawn (series length before an update). */
+let drawnCount = 0
+
 function onStoreEvent(e: SeriesEvent) {
   if (e.symbol !== props.symbol || e.tf !== props.tf) return
   if (e.kind === 'live') renderLive()
   else if (e.kind === 'prepend') renderPrepend(e.added ?? 0)
-  else if (e.kind === 'reset') renderAll()
+  else if (e.kind === 'reset') {
+    renderAll()
+    requestFullHistory()
+  } else if (e.kind === 'full') renderFull(drawnCount)
   else syncStatus()
+}
+
+/** Д on screen → page back to the listing start (A20); the store no-ops for other TFs / when complete. */
+function requestFullHistory() {
+  if (props.active) void store.completeHistory(props.symbol, props.tf)
 }
 
 function checkHistory() {
@@ -198,7 +230,7 @@ function onRangeChange(_range: LogicalRange | null) {
 function load() {
   fitPending = opensZoomedOut(props.tf)
   renderAll() // instant from memory/cache if present
-  void store.ensure(props.symbol, props.tf)
+  void store.ensure(props.symbol, props.tf).then(requestFullHistory)
 }
 
 /**
@@ -506,7 +538,12 @@ watch(
 )
 watch(
   () => props.active,
-  (a) => (a ? startLayoutLoop() : stopLayoutLoop()),
+  (a) => {
+    if (a) {
+      startLayoutLoop()
+      requestFullHistory()
+    } else stopLayoutLoop()
+  },
 )
 
 watch(

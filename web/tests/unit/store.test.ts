@@ -70,7 +70,7 @@ describe('CandleStore history paging backoff', () => {
 
   it('does not refire history requests after a failure until the backoff passes', async () => {
     const store = new CandleStore()
-    fetchKlines.mockResolvedValueOnce(series(3000, 3))
+    fetchKlines.mockResolvedValueOnce(series(1_000_000, 300)) // full page → history may continue
     await store.ensure('BTCUSDT', '5m')
 
     fetchKlines.mockRejectedValue(new Error('boom'))
@@ -88,7 +88,7 @@ describe('CandleStore history paging backoff', () => {
 
   it('waits at least until the global 429 gate opens', async () => {
     const store = new CandleStore()
-    fetchKlines.mockResolvedValueOnce(series(3000, 3))
+    fetchKlines.mockResolvedValueOnce(series(1_000_000, 300)) // full page → history may continue
     await store.ensure('BTCUSDT', '5m')
     rateLimitGate.record(429, '120')
     fetchKlines.mockRejectedValueOnce(new Error('429'))
@@ -96,5 +96,50 @@ describe('CandleStore history paging backoff', () => {
     vi.setSystemTime(1_000_000 + 60_000)
     await store.loadOlder('BTCUSDT', '5m')
     expect(fetchKlines).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('CandleStore Д full history (A20)', () => {
+  const DAY = 86_400
+  it('loads 1500 bars for Д/Н and 300 for 5м', async () => {
+    const store = new CandleStore()
+    fetchKlines.mockResolvedValue(series(0, 3))
+    await store.ensure('BTCUSDT', '1d')
+    await store.ensure('BTCUSDT', '5m')
+    expect(fetchKlines.mock.calls[0]![0]).toMatchObject({ interval: '1d', limit: 1500 })
+    expect(fetchKlines.mock.calls[1]![0]).toMatchObject({ interval: '5m', limit: 300 })
+  })
+  it('marks a short first page as the listing start (no paging needed)', async () => {
+    const store = new CandleStore()
+    fetchKlines.mockResolvedValueOnce(series(0, 400, DAY))
+    await store.ensure('NEWUSDT', '1d')
+    expect(store.get('NEWUSDT', '1d')!.historyExhausted).toBe(true)
+    expect(await store.completeHistory('NEWUSDT', '1d')).toBe(true)
+    expect(fetchKlines).toHaveBeenCalledTimes(1)
+  })
+  it('pages Д back to the listing start and emits "full"', async () => {
+    const store = new CandleStore()
+    const events: string[] = []
+    store.subscribe((e) => events.push(e.kind))
+    fetchKlines.mockResolvedValueOnce(series(1000 * DAY, 1500, DAY)) // days 1000..2499
+    await store.ensure('BTCUSDT', '1d')
+    expect(store.get('BTCUSDT', '1d')!.historyExhausted).toBe(false)
+    fetchKlines.mockResolvedValueOnce(series(0, 1000, DAY)) // days 0..999 → short page = start
+    expect(await store.completeHistory('BTCUSDT', '1d')).toBe(true)
+    const s = store.get('BTCUSDT', '1d')!
+    expect(s.candles).toHaveLength(2500)
+    expect(s.candles[0]!.time).toBe(0)
+    expect(fetchKlines.mock.calls[1]![0]).toMatchObject({ limit: 1500, endTime: 1000 * DAY * 1000 - 1 })
+    expect(events).toContain('full')
+    // Already complete: no further requests.
+    expect(await store.completeHistory('BTCUSDT', '1d')).toBe(true)
+    expect(fetchKlines).toHaveBeenCalledTimes(2)
+  })
+  it('does not page 1w or 5m', async () => {
+    const store = new CandleStore()
+    fetchKlines.mockResolvedValue(series(0, 1500, 7 * DAY))
+    await store.ensure('BTCUSDT', '1w')
+    expect(await store.completeHistory('BTCUSDT', '1w')).toBe(false)
+    expect(fetchKlines).toHaveBeenCalledTimes(1)
   })
 })

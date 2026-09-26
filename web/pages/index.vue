@@ -3,6 +3,7 @@
 // Orchestrates preloading, the memory window and live WS streams (arch §4, §5.2).
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { liveSymbols, memorySymbols, preloadSymbols } from '~/lib/feed/window'
+import { preloadTfs } from '~/lib/candles/policy'
 import { tickDecimals } from '~/lib/binance/parse'
 import { lastCandle } from '~/lib/candles/merge'
 import { canvasToPng, composeScreenshot, shareOrDownload, type PlaqueSnapshot } from '~/lib/share/compose'
@@ -37,13 +38,16 @@ watch(
 
     if (settleTimer) clearTimeout(settleTimer)
     settleTimer = setTimeout(() => {
+      // Budget (A20): per new ticker 5м+1ч (limit 300, weight 2 each) + Д/Н (limit 1500, weight 10 each)
+      // = 24; Д full history adds 10 per extra page, only for the Д chart on screen. The big Д/Н pages are
+      // preloaded for the current and next ticker only (preloadTfs); the ticker after that gets the light
+      // TFs + the active one: ~24–34 weight per swipe, so even a steady 1 swipe/s stays under 2400/min.
+      // Revisits within 24 h hit the IndexedDB cache and fetch only the tail. Memory: ±3 tickers.
+      const tfs = settings.tfButtons
+      const active = settings.activeTf
       const cur = list[index]
-      // Current ticker: all TF buttons (4 since A15) in parallel so TF switches are instant (F3).
-      // Budget: klines limit 300 = weight 2; a new stop adds ~1 new ticker × 4 TFs = 8 weight
-      // (neighbours are mostly cached already) — far below the 2400/min IP limit. Memory: ±3 tickers × 4 TFs.
-      if (cur) candles.preload([cur], settings.tfButtons)
-      // Then the 2 next tickers, all TFs (incl. Н).
-      candles.preload(preloadSymbols(list, index), settings.tfButtons)
+      if (cur) candles.preload([cur], preloadTfs(0, tfs, active))
+      preloadSymbols(list, index).forEach((sym, i) => candles.preload([sym], preloadTfs(i + 1, tfs, active)))
     }, SETTLE_MS)
   },
   { immediate: true },
