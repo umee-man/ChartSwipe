@@ -37,6 +37,9 @@ export default defineNuxtConfig({
         { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover' },
         { name: 'theme-color', content: '#0b0e11' },
         { name: 'color-scheme', content: 'dark' },
+        // No cross-origin Referer at all: Binance's WAF 403s requests referred from *.sslip.io hosts
+        // (see FAPI_FETCH_INIT in lib/binance/rest.ts; this also covers any other cross-origin request).
+        { name: 'referrer', content: 'same-origin' },
       ],
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' },
@@ -58,6 +61,15 @@ export default defineNuxtConfig({
       // and answers the in-flight imports with 504 "Outdated Optimize Dep", relying on an HMR full reload —
       // on a phone over LAN that left a dark, never-mounted page (the reported "black screen").
       include: ['lightweight-charts', 'idb'],
+    },
+  },
+
+  // `nuxt dev` only: REST route of the Caddy proxy on srv2 (ADR A13), so the REST fallback can be exercised
+  // locally. The /bnc-ws WebSocket route is not proxied in dev (Nuxt's dev server does not forward upgrades
+  // to Nitro devProxy); in dev the WS stays on direct fstream.
+  nitro: {
+    devProxy: {
+      '/fapi': { target: 'https://fapi.binance.com/fapi', changeOrigin: true },
     },
   },
 

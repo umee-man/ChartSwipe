@@ -1,8 +1,12 @@
 // Single combined-stream WebSocket manager for live klines (arch §4, §10: ≤ 3 live subscriptions).
 import { parseWsKline } from './parse'
+import { DIRECT_ENDPOINTS } from './transport'
 import type { Candle, WsKlineEvent } from './types'
 
-export const FSTREAM_URL = 'wss://fstream.binance.com/stream'
+/** Direct combined-stream route. The legacy `/stream` path accepts SUBSCRIBE but never sends klines any more. */
+export const FSTREAM_URL = DIRECT_ENDPOINTS.ws
+/** No kline within this long after connecting → the route counts as unhealthy (see WsManagerOptions.onUnhealthy). */
+export const WS_SILENT_MS = 5_000
 /** Hard cap on live subscriptions: current ticker + 2 neighbours (arch §4, §10). */
 export const MAX_LIVE_STREAMS = 3
 /**
@@ -68,17 +72,27 @@ export interface WsLike {
 }
 
 export interface WsManagerOptions {
-  url?: string
+  /** Fixed URL, or a getter re-read on every (re)connect so a route switch takes effect. */
+  url?: string | (() => string)
   cap?: number
   createSocket?: (url: string) => WsLike
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (id: unknown) => void
+  /**
+   * Opt-in silence watchdog, ms: a socket that delivers no kline within this long after opening is closed
+   * and reconnected (and reported via onUnhealthy). Off by default.
+   */
+  silentTimeoutMs?: number
+  /** A socket closed or went silent before delivering any kline (blocked network, dead route). */
+  onUnhealthy?: (url: string) => void
 }
 
 const OPEN = 1
 
 export class WsManager {
-  private readonly url: string
+  private readonly url: () => string
+  private readonly silentTimeoutMs: number | null
+  private readonly onUnhealthy: ((url: string) => void) | null
   private readonly cap: number
   private readonly createSocket: (url: string) => WsLike
   private readonly setTimer: (fn: () => void, ms: number) => unknown
@@ -95,10 +109,16 @@ export class WsManager {
   private reconnectTimer: unknown = null
   private syncTimer: unknown = null
   private stableTimer: unknown = null
+  private silentTimer: unknown = null
+  /** The current socket has delivered at least one kline. */
+  private gotKline = false
   private disposed = false
 
   constructor(opts: WsManagerOptions = {}) {
-    this.url = opts.url ?? FSTREAM_URL
+    const url = opts.url ?? FSTREAM_URL
+    this.url = typeof url === 'string' ? () => url : url
+    this.silentTimeoutMs = opts.silentTimeoutMs ?? null
+    this.onUnhealthy = opts.onUnhealthy ?? null
     this.cap = opts.cap ?? MAX_LIVE_STREAMS
     this.createSocket = opts.createSocket ?? ((u) => new WebSocket(u) as unknown as WsLike)
     this.setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
@@ -151,9 +171,10 @@ export class WsManager {
   }
 
   private clearTimers(): void {
-    for (const id of [this.syncTimer, this.stableTimer]) if (id !== null) this.clearTimer(id)
+    for (const id of [this.syncTimer, this.stableTimer, this.silentTimer]) if (id !== null) this.clearTimer(id)
     this.syncTimer = null
     this.stableTimer = null
+    this.silentTimer = null
   }
 
   private markStable(): void {
@@ -176,10 +197,21 @@ export class WsManager {
 
   private connect(): void {
     if (this.disposed || this.socket) return
-    const ws = this.createSocket(this.url)
+    const url = this.url()
+    const ws = this.createSocket(url)
     this.socket = ws
     this.active = []
+    this.gotKline = false
     ws.onopen = () => {
+      if (this.silentTimeoutMs !== null) {
+        if (this.silentTimer !== null) this.clearTimer(this.silentTimer)
+        this.silentTimer = this.setTimer(() => {
+          this.silentTimer = null
+          if (this.socket !== ws || this.gotKline) return
+          this.onUnhealthy?.(url)
+          this.dropSocket(ws)
+        }, this.silentTimeoutMs)
+      }
       // Do not reset the backoff yet: a server that accepts and immediately drops would otherwise
       // cause a tight 1 s reconnect loop. Reset after STABLE_AFTER_MS or on the first kline.
       if (this.stableTimer !== null) this.clearTimer(this.stableTimer)
@@ -194,11 +226,24 @@ export class WsManager {
     }
     ws.onclose = () => {
       if (this.socket !== ws) return
-      this.socket = null
-      this.active = []
-      this.clearTimers()
-      this.scheduleReconnect()
+      if (!this.gotKline) this.onUnhealthy?.(url)
+      this.dropSocket(ws)
     }
+  }
+
+  /** Forget `ws` (closing it if still open) and reconnect with backoff; the URL is re-read then. */
+  private dropSocket(ws: WsLike): void {
+    ws.onclose = null
+    ws.onmessage = null
+    try {
+      ws.close() // no-op when already closed
+    } catch {
+      // ignore
+    }
+    this.socket = null
+    this.active = []
+    this.clearTimers()
+    this.scheduleReconnect()
   }
 
   private scheduleReconnect(): void {
@@ -240,6 +285,11 @@ export class WsManager {
     if (!this.active.includes(msg.stream)) return
     const candle = parseWsKline(data.k)
     if (!candle) return
+    this.gotKline = true
+    if (this.silentTimer !== null) {
+      this.clearTimer(this.silentTimer)
+      this.silentTimer = null
+    }
     if (this.stableTimer !== null) this.markStable()
     const evt = { stream: msg.stream, symbol: data.k.s, interval: data.k.i, candle, closed: data.k.x }
     for (const fn of this.listeners) fn(evt)

@@ -31,6 +31,7 @@
 | A10 | **Без стены логина.** `/` сразу открывает ленту; уровни, избранное, вотчлисты живут локально (IndexedDB). Вход (magic link) нужен только для синка в MT5/TV — при входе локальные данные выгружаются на сервер | Ноль шагов до первого свайпа |
 | A12 | Деплой на srv2 за существующим Caddy, без Dokploy; адрес на sslip.io | На сервере Caddy уже занимает 80/443; бесплатный LE-сертификат без покупки домена |
 | A11 | Вертикальная лента — **собственный 3-слайдовый пейджер** на CSS `transform` (`web/components/FeedPager.vue`) вместо Swiper; все решения принимает `useGestures` (§5.3). Swiper из стека (§5.1) не используется | Swiper при `allowTouchMove=false` сводится к анимации `translate`, а его virtual-режим во Vue неудобен для keyed-компонентов с живым canvas. Свой пейджер — ~150 строк, без зависимости, `chart.remove()` вызывается ровно при выходе слайда из окна |
+| A13 | **Binance: сначала напрямую, фоллбэк — same-origin прокси Caddy на srv2.** `web/lib/binance/transport.ts`: REST и WS идут на `fapi`/`fstream`; при сетевой ошибке (`TypeError`/CORS), HTTP 403/451 или WS, который не открылся / не прислал ни одной свечи за 5 с, клиент переключается на `https://<сайт>/fapi/v1/…` и `wss://<сайт>/bnc-ws/market/stream` и помнит выбор в `localStorage` (повторная проба напрямую через 24 ч). 429/418/5xx маршрут не меняют (rate-limit gate прежний). Все запросы к Binance — `referrerPolicy: 'no-referrer'`, на странице `<meta name="referrer" content="same-origin">` | Сети части пользователей режут Binance; кроме того CloudFront-WAF Binance отвечает 403 без CORS-заголовков на запросы с `Referer` с поддомена `*.sslip.io`/`*.nip.io` (26.09.2026: на проде не грузилась ни одна свеча). Через прокси вес rate-limit считается на IP srv2 — для MVP с одним пользователем допустимо |
 
 ## 3. Структура репозитория (монорепо)
 
@@ -69,8 +70,8 @@ flowchart LR
   App -.->|строка вручную| Pine[Pine-индикатор]
 ```
 
-- **Свечи:** `GET https://fapi.binance.com/fapi/v1/klines?symbol=&interval=&limit=300` (вес 2). История: тот же запрос с `endTime`.
-- **Живая свеча:** `wss://fstream.binance.com/ws/<symbol>@kline_<interval>`. Одновременно не больше 3 соединений/подписок (текущий + 2 соседа), лишние закрываются при свайпе. Предпочтительно один combined stream с `SUBSCRIBE`/`UNSUBSCRIBE`.
+- **Свечи:** `GET https://fapi.binance.com/fapi/v1/klines?symbol=&interval=&limit=300` (вес 2). История: тот же запрос с `endTime`. Фоллбэк (A13): тот же путь на своём origin — `https://<сайт>/fapi/v1/klines…` (Caddy → `fapi.binance.com`). Без `Referer`.
+- **Живая свеча:** один combined stream `wss://fstream.binance.com/market/stream` с `SUBSCRIBE`/`UNSUBSCRIBE` (старые `/stream` и `/ws` принимают подписку, но свечей больше не шлют). Одновременно не больше 3 подписок (текущий + 2 соседа), лишние снимаются при свайпе. Фоллбэк (A13): `wss://<сайт>/bnc-ws/market/stream` (Caddy → `fstream.binance.com/market/stream`).
 - **Лента top50 / движение дня:** `GET /fapi/v1/ticker/24hr` (без symbol, вес 40) раз в 60 с; фильтр `quoteVolume` (top50) или `|priceChangePercent| > 5`.
 - **ЛП сегодня (A4):** клиент тянет `1d`-свечи (limit 3) по top-50 и прогоняет детектор по PDH/PDL. Вес ≈ 50 × 1 = 50.
 - **Уровни:** оптимистичное обновление в Pinia → `POST/PATCH/DELETE /v1/levels` с дебаунсом перетаскивания 300 мс. Цель: на сервере < 1 с.

@@ -50,6 +50,14 @@ describe('fapi calls behind the gate', () => {
     expect((err as BinanceHttpError).isRateLimited).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1) // second call never hit the network
   })
+
+  it('never sends a Referer (Binance WAF 403s *.sslip.io referers → CORS error, no charts)', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('[]', { status: 200 }))
+    await fetchKlines({ symbol: 'BTCUSDT', interval: '5m' })
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(init.referrerPolicy).toBe('no-referrer')
+    expect(init.credentials).toBe('omit')
+  })
 })
 
 describe('price precision fallback (no exchangeInfo)', () => {

@@ -1,7 +1,8 @@
 // App-wide market data singletons: candle repository + one WS manager (arch §4, §5.2).
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import type { Interval } from '~/lib/binance/types'
-import { klineStream, WsManager } from '~/lib/binance/ws'
+import { binanceTransport } from '~/lib/binance/transport'
+import { klineStream, WS_SILENT_MS, WsManager } from '~/lib/binance/ws'
 import { lastCandle } from '~/lib/candles/merge'
 import { CandleStore } from '~/lib/candles/store'
 
@@ -11,7 +12,17 @@ let wsManager: WsManager | null = null
 function init(): { store: CandleStore; ws: WsManager } {
   if (!candleStore || !wsManager) {
     const store = new CandleStore()
-    const ws = new WsManager()
+    // Direct fstream first; a socket that never opens or stays silent moves REST+WS to the proxy (ADR A13).
+    const route = () => binanceTransport.route
+    let urlRoute = route()
+    const ws = new WsManager({
+      url: () => {
+        urlRoute = route()
+        return binanceTransport.endpoints(urlRoute).ws
+      },
+      silentTimeoutMs: WS_SILENT_MS,
+      onUnhealthy: () => void binanceTransport.reportWsFailure(urlRoute),
+    })
     ws.onKline((e) => store.applyLive(e.symbol, e.interval as Interval, e.candle))
     candleStore = store
     wsManager = ws

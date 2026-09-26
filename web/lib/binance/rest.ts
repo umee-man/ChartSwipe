@@ -1,8 +1,9 @@
 // Typed REST client for Binance USDⓈ-M Futures public endpoints (arch §4). No API keys.
 import { parseExchangeInfo, parseKlines, parseTickers } from './parse'
+import { binanceTransport, DIRECT_ENDPOINTS, type BinanceTransport } from './transport'
 import type { Candle, Interval, SymbolInfo, Ticker24h } from './types'
 
-export const FAPI_BASE = 'https://fapi.binance.com'
+export const FAPI_BASE = DIRECT_ENDPOINTS.rest
 /** Default history page size (arch §4: limit=300, weight 2). */
 export const KLINES_LIMIT = 300
 
@@ -63,10 +64,35 @@ export function buildUrl(path: string, query: Query = {}, base = FAPI_BASE): str
   return `${base}${path}${qs ? `?${qs}` : ''}`
 }
 
+/**
+ * Never send a Referer to Binance. Its CloudFront WAF answers 403 (HTML, no Access-Control-Allow-Origin)
+ * to requests whose Referer is on some hosts — e.g. any *.sslip.io / *.nip.io subdomain, where production
+ * runs — so the browser reports a CORS error and no candles load. Origin alone is accepted.
+ */
+export const FAPI_FETCH_INIT: RequestInit = { referrerPolicy: 'no-referrer', credentials: 'omit' }
+
+let transport: BinanceTransport = binanceTransport
+
+/** Swap the route selector (tests). */
+export function setRestTransport(t: BinanceTransport): void {
+  transport = t
+}
+
 async function getJson(path: string, query?: Query, signal?: AbortSignal): Promise<unknown> {
   const wait = rateLimitGate.remaining()
   if (wait > 0) throw new BinanceHttpError(429, path, `blocked locally for ${Math.ceil(wait / 1000)} s`)
-  const res = await fetch(buildUrl(path, query), { signal })
+  const route = transport.route
+  try {
+    return await getJsonOnce(transport.endpoints(route).rest, path, query, signal)
+  } catch (err) {
+    // Direct Binance unreachable/blocked from this network → retry once via the same-origin proxy (ADR A13).
+    if (signal?.aborted || !transport.reportRestFailure(route, err)) throw err
+    return getJsonOnce(transport.endpoints().rest, path, query, signal)
+  }
+}
+
+async function getJsonOnce(base: string, path: string, query: Query | undefined, signal?: AbortSignal): Promise<unknown> {
+  const res = await fetch(buildUrl(path, query, base), { ...FAPI_FETCH_INIT, signal })
   rateLimitGate.record(res.status, res.headers.get('Retry-After'))
   if (!res.ok) {
     const body = await res.text().catch(() => '')
