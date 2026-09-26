@@ -64,7 +64,8 @@
 - [?] `chartswipe.pine`: парсинг строки, фильтр по `syminfo.ticker` без `.P` — Python-зеркало парсера 11/11 векторов; компиляция в Pine Editor не проверена
 - [ ] Экраны: Вотчлисты (drag-сортировка, импорт текстом и .txt TV), Уровни (поиск), Настройки
 - [ ] Полировка жестов на iOS Safari и Android Chrome
-- [~] Docker + Dokploy, HTTPS, Sentry — `web/Dockerfile` (node:24-alpine, Nitro node-server :3000, healthcheck) готов, локально образ не собран (Docker daemon не запущен); осталось: Dokploy-приложение + домен/HTTPS, `api`-образ, Sentry
+- [x] Деплой `web` на srv2: образ собран на сервере, контейнер `chartswipe-web` на 127.0.0.1:3410, Caddy + Let's Encrypt → https://chartswipe.195-20-249-42.sslip.io (200, сертификат валиден; остальные сайты на srv2 проверены)
+- [ ] Деплой `api`-образа, Sentry
 - [ ] Проверка NFR (architecture §10)
 
 **Критерий готовности MVP:** пользуюсь сам каждый день неделю.
@@ -74,7 +75,7 @@ Push-алерты (воркер + Web Push), серверный детектор
 
 ## To test (пользователь)
 Запуск: `cd web && npm run dev` → на телефоне в той же Wi‑Fi открыть `http://<IP-компьютера>:3000` (обычная вкладка Safari/Chrome).
-Быстрее и ближе к проду: `cd web && npm run build && npm start` (тот же адрес, порт 3000). Прод: HTTPS-домен на VPS (Dokploy, `web/Dockerfile`).
+Быстрее и ближе к проду: `cd web && npm run build && npm start` (тот же адрес, порт 3000). Прод: https://chartswipe.195-20-249-42.sslip.io (srv2, Caddy).
 
 0. **Диагностика:** при старте виден экран «ChartSwipe · Загрузка…», а не чёрный фон. Если что-то сломалось — появляется экран «Ошибка» с текстом и кнопкой «Перезагрузить»: сделать скриншот и прислать. Если данные не грузятся — на графике/в ленте причина «Binance недоступен: …».
 

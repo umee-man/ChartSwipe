@@ -29,6 +29,7 @@
 | A8 | Рабочее название — ChartSwipe | Не блокирует разработку |
 | A9 | **Только веб-сайт.** Открыл адрес в мобильном браузере — сразу лента и свайп. Никаких установок, баннеров «добавить на экран», сторов, Capacitor (убран и из v2) | Требование пользователя (26.09.2026). Service worker остаётся только как невидимый кэш для скорости |
 | A10 | **Без стены логина.** `/` сразу открывает ленту; уровни, избранное, вотчлисты живут локально (IndexedDB). Вход (magic link) нужен только для синка в MT5/TV — при входе локальные данные выгружаются на сервер | Ноль шагов до первого свайпа |
+| A12 | Деплой на srv2 за существующим Caddy, без Dokploy; адрес на sslip.io | На сервере Caddy уже занимает 80/443; бесплатный LE-сертификат без покупки домена |
 | A11 | Вертикальная лента — **собственный 3-слайдовый пейджер** на CSS `transform` (`web/components/FeedPager.vue`) вместо Swiper; все решения принимает `useGestures` (§5.3). Swiper из стека (§5.1) не используется | Swiper при `allowTouchMove=false` сводится к анимации `translate`, а его virtual-режим во Vue неудобен для keyed-компонентов с живым canvas. Свой пейджер — ~150 строк, без зависимости, `chart.remove()` вызывается ровно при выходе слайда из окна |
 
 ## 3. Структура репозитория (монорепо)
@@ -190,9 +191,13 @@ MVP-эндпоинты: `levels` (GET/POST/PATCH/DELETE), `watchlists` (GET/PUT)
 
 ## 11. Деплой
 
-Docker-образы `web` и `api` (uvicorn) → Dokploy на существующем VPS, HTTPS обязателен (SW, буфер обмена, WebRequest MT5). Supabase — облачный проект. Sentry — клиент и API.
+Docker-образы `web` и `api` (uvicorn) → VPS **srv2** (195.20.249.42). Dokploy **не используется**: порты 80/443 на сервере уже держит системный Caddy 2.11 с другими сайтами, Traefik Dokploy конфликтовал бы с ним (A12). HTTPS обязателен (SW, буфер обмена, WebRequest MT5). Supabase — облачный проект. Sentry — клиент и API.
 
-- **`web`** (`web/Dockerfile`): multi-stage `node:24-alpine` — `npm ci` + `nuxi build` → runtime-слой копирует только `.output`, запуск `node .output/server/index.mjs` (Nitro node-server, SPA-оболочка на любой путь), пользователь `node`, `HOST=0.0.0.0`, `PORT=3000`, `HEALTHCHECK` на `/`. Без nginx: TLS и домен — на прокси Dokploy (Traefik) → контейнер :3000.
+- **Прод-адрес:** `https://chartswipe.195-20-249-42.sslip.io` — sslip.io резолвит имя в IP, Caddy сам выпускает/продлевает сертификат Let's Encrypt.
+- **Раскладка на srv2:** код `/opt/chartswipe` (git clone), контейнер `chartswipe-web` (`--restart unless-stopped`, порт только `127.0.0.1:3410→3000`), блок в `/etc/caddy/Caddyfile`: `reverse_proxy 127.0.0.1:3410` + `encode zstd gzip`. Правка Caddyfile — только с бэкапом, `caddy validate` и `systemctl reload caddy`.
+- **Обновление:** `ssh srv2 'cd /opt/chartswipe && git pull && docker build -t chartswipe-web ./web && docker rm -f chartswipe-web && docker run -d --name chartswipe-web --restart unless-stopped -p 127.0.0.1:3410:3000 chartswipe-web'`.
+
+- **`web`** (`web/Dockerfile`): multi-stage `node:24-alpine` — `npm ci` + `nuxi build` → runtime-слой копирует только `.output`, запуск `node .output/server/index.mjs` (Nitro node-server, SPA-оболочка на любой путь), пользователь `node`, `HOST=0.0.0.0`, `PORT=3000`, `HEALTHCHECK` на `/`. Без nginx: TLS и домен — на системном Caddy → контейнер :3000.
 - **Кэш-заголовки** — через Nitro `routeRules` в `nuxt.config.ts`: `/_nuxt/**` — `max-age=31536000, immutable` (хэшированные бандлы); `/`, `/sw.js`, `/manifest.webmanifest` — `no-cache`, чтобы деплой применялся сразу.
 - **Совместимость браузеров:** сборка транспилируется до `es2020 / Safari 14 / Chrome 87` (JS и CSS, `vite.build.target/cssTarget`).
 - **Диагностика на экране:** инлайн-скрипт `web/diagnostics/early-errors.js` в `<head>` показывает оверлей «Ошибка» (window error / unhandledrejection / ошибки Vue, таймаут запуска 20 с) — даже если бандл не загрузился.
