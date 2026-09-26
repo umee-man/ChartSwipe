@@ -40,6 +40,7 @@ watch(
 )
 
 const favoritesOpen = ref(false)
+const hiddenOpen = ref(false)
 
 // Hide with undo toast.
 const lastHidden = ref<string | null>(null)
@@ -63,7 +64,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="feed">
-    <FeedHeader @open-favorites="favoritesOpen = true" />
+    <FeedHeader @open-favorites="favoritesOpen = true" @open-hidden="hiddenOpen = true" />
     <FeedPager>
       <div v-if="lastHidden" class="toast" data-gesture-ignore>
         <span>{{ lastHidden }} скрыт</span>
@@ -74,6 +75,7 @@ onBeforeUnmount(() => {
     <TfBar />
     <ActionBar :symbol="feed.currentSymbol" @hidden="onHidden" @open-favorites="favoritesOpen = true" />
     <FavoritesSheet v-if="favoritesOpen" @close="favoritesOpen = false" />
+    <HiddenSheet v-if="hiddenOpen" @close="hiddenOpen = false" />
   </main>
 </template>
 

@@ -8,7 +8,7 @@ import { useFeedStore } from '~/stores/feed'
 import { useSettingsStore } from '~/stores/settings'
 import { useWatchlistsStore } from '~/stores/watchlists'
 
-const emit = defineEmits<{ 'open-favorites': [] }>()
+const emit = defineEmits<{ 'open-favorites': []; 'open-hidden': [] }>()
 
 const feed = useFeedStore()
 const settings = useSettingsStore()
@@ -18,6 +18,11 @@ const menuOpen = ref(false)
 function openFavorites() {
   menuOpen.value = false
   emit('open-favorites')
+}
+
+function openHidden() {
+  menuOpen.value = false
+  emit('open-hidden')
 }
 
 const symbol = toRef(feed, 'currentSymbol')
@@ -79,6 +84,9 @@ async function pick(id: FeedSourceId) {
       <hr />
       <button type="button" role="menuitem" class="item" @click="openFavorites">
         Список избранного ({{ watchlists.favorites.length }})…
+      </button>
+      <button type="button" role="menuitem" class="item" @click="openHidden">
+        Скрытые ({{ watchlists.hidden.length }})…
       </button>
       <button type="button" role="menuitemcheckbox" :aria-checked="settings.showVolume" class="item" @click="settings.toggleVolume()">
         Объём: {{ settings.showVolume ? 'вкл' : 'выкл' }}
