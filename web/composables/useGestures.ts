@@ -1,11 +1,19 @@
-// Gesture arbiter over pointer events (arch §5.3). Decides feed swipe vs chart pan so that neither
-// the browser nor lightweight-charts steals the gesture. Items 3–6 are implemented; items 1–2
-// (level drag, long press → new level) plug in through `hitTest` returning 'level' and `onLongPress`.
+// Gesture arbiter over pointer events (arch §5.3). Decides level drag / long press / feed swipe / chart
+// pan so that neither the browser nor lightweight-charts steals the gesture. Resolution order:
+//   1. pointer on a level plaque → 'level' (feed + pan locked; drag moves, swipe right deletes, tap edits)
+//   2. long press 400 ms without > 8 px movement → new level ('longpress')
+//   3. first 12 px: < 30° to vertical → feed swipe, else chart pan (LWC)
+//   4. feed swipe commits at > 20 % height or > 0.5 px/ms
+//   5. pinch / price-axis drag → chart; double tap → reset view
+//   6. 20 px left-edge dead zone ignored (iOS back swipe)
 import { onBeforeUnmount, onMounted, readonly, ref, type Ref } from 'vue'
 import {
   DEFAULT_GESTURE_CONFIG,
+  exceedsLongPressSlop,
   isDoubleTap,
   isInEdgeDeadZone,
+  LONG_PRESS_MS,
+  LONG_PRESS_SLOP,
   resolveDirection,
   swipeOutcome,
   VelocityTracker,
@@ -25,13 +33,16 @@ export interface GestureHandlers {
   /** Item 5: double tap → reset chart. */
   onDoubleTap?(p: { x: number; y: number }): void
   /**
-   * Classify the pointer-down target before direction locking.
-   * 'priceAxis' → chart immediately (vertical drag scales price, item 5).
-   * 'level' → reserved for item 1 (level label drag), feed and pan are blocked.
+   * Classify the pointer-down target before anything else.
+   * 'level' → the pointer is on a level plaque (item 1); 'priceAxis' → chart immediately (item 5).
    */
   hitTest?(e: PointerEvent): GestureTarget
-  /** Reserved for item 2 (long press 400 ms → new level). Not wired yet. */
+  /** Item 2: long press on the chart (client coordinates of the finger). */
   onLongPress?(p: { x: number; y: number }): void
+  /** Item 1: plaque drag in progress (offsets from the pointer-down point). */
+  onLevelMove?(dx: number, dy: number): void
+  /** Item 1: plaque released. `tap` = short press without movement (opens the level sheet). */
+  onLevelEnd?(dx: number, dy: number, info: { tap: boolean; cancelled: boolean }): void
 }
 
 /** Elements that handle their own taps (buttons, menus) never produce double-tap resets. */
@@ -42,11 +53,19 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
   const pointers = new Map<number, { x: number; y: number }>()
   const velocity = new VelocityTracker(cfg.velocityWindowMs)
   let start = { x: 0, y: 0, t: 0 }
+  let last = { x: 0, y: 0 }
   let startTarget: EventTarget | null = null
   let startIsTouch = false
   let lastTap: Tap | null = null
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null
+
+  function clearLongPress() {
+    if (longPressTimer) clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
 
   function reset() {
+    clearLongPress()
     mode.value = 'idle'
     velocity.reset()
     startTarget = null
@@ -57,13 +76,16 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.size > 1) {
-      // Second finger → pinch belongs to the chart. Abort any feed drag in progress.
+      // Second finger → pinch belongs to the chart. Abort feed drag / pending long press / plaque drag.
+      clearLongPress()
       if (mode.value === 'feed') h.onFeedEnd(0)
-      if (mode.value !== 'ignored') mode.value = 'multi'
+      if (mode.value === 'level') h.onLevelEnd?.(0, 0, { tap: false, cancelled: true })
+      if (mode.value !== 'ignored' && mode.value !== 'longpress') mode.value = 'multi'
       return
     }
 
     start = { x: e.clientX, y: e.clientY, t: e.timeStamp }
+    last = { x: e.clientX, y: e.clientY }
     startTarget = e.target
     startIsTouch = e.pointerType === 'touch'
     velocity.reset()
@@ -73,10 +95,29 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
       mode.value = 'ignored' // item 6: leave the edge to the browser's back swipe
       return
     }
+    // Buttons/toasts over the chart: a plain tap must stay a click — no plaque grab, no long press.
+    if (e.target instanceof Element && e.target.closest(INTERACTIVE)) {
+      mode.value = 'pending'
+      return
+    }
     const target = h.hitTest?.(e) ?? 'none'
-    if (target === 'level') mode.value = 'level'
-    else if (target === 'priceAxis') mode.value = 'chart'
-    else mode.value = 'pending'
+    if (target === 'level') {
+      mode.value = 'level'
+      return
+    }
+    if (target === 'priceAxis') {
+      mode.value = 'chart'
+      return
+    }
+    mode.value = 'pending'
+    if (h.onLongPress) {
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null
+        if (mode.value !== 'pending' || pointers.size !== 1) return
+        mode.value = 'longpress' // item 2
+        h.onLongPress?.({ x: last.x, y: last.y })
+      }, LONG_PRESS_MS)
+    }
   }
 
   function onPointerMove(e: PointerEvent) {
@@ -86,16 +127,23 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     p.y = e.clientY
     if (pointers.size > 1) return
 
+    last = { x: e.clientX, y: e.clientY }
     const dx = e.clientX - start.x
     const dy = e.clientY - start.y
     velocity.add(e.timeStamp, e.clientY)
 
+    if (longPressTimer && exceedsLongPressSlop(dx, dy, LONG_PRESS_SLOP)) clearLongPress()
+
     if (mode.value === 'pending') {
       const dir = resolveDirection(dx, dy, cfg) // item 3
-      if (dir) mode.value = dir
+      if (dir) {
+        clearLongPress()
+        mode.value = dir
+      }
       if (dir === 'feed') cancelChartLongTap()
     }
     if (mode.value === 'feed') h.onFeedMove(dy)
+    else if (mode.value === 'level') h.onLevelMove?.(dx, dy)
     blockIfOwned(e)
   }
 
@@ -106,13 +154,15 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
 
     const dy = e.clientY - start.y
     const dx = e.clientX - start.x
+    const cancelled = e.type === 'pointercancel'
+    const isTap = !cancelled && e.timeStamp - start.t <= cfg.tapMaxMs && Math.hypot(dx, dy) < LONG_PRESS_SLOP
     if (mode.value === 'feed') {
-      const outcome = e.type === 'pointercancel' ? 0 : swipeOutcome(dy, velocity.velocity(), h.height(), cfg) // item 4
-      h.onFeedEnd(outcome)
-    } else if (mode.value === 'pending' && e.type === 'pointerup') {
-      const isTap = e.timeStamp - start.t <= cfg.tapMaxMs && Math.hypot(dx, dy) < cfg.lockDistance
+      h.onFeedEnd(cancelled ? 0 : swipeOutcome(dy, velocity.velocity(), h.height(), cfg)) // item 4
+    } else if (mode.value === 'level') {
+      h.onLevelEnd?.(dx, dy, { tap: isTap, cancelled })
+    } else if (mode.value === 'pending' && isTap) {
       const interactive = startTarget instanceof Element && startTarget.closest(INTERACTIVE)
-      if (isTap && !interactive) {
+      if (!interactive) {
         const tap: Tap = { t: e.timeStamp, x: e.clientX, y: e.clientY }
         if (isDoubleTap(lastTap, tap, cfg)) {
           lastTap = null
@@ -127,7 +177,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
 
   /**
    * lightweight-charts arms a 240 ms long-tap timer on touchstart (→ crosshair tracking mode) and
-   * clears it only on its own touchmove/touchcancel. We block its touchmoves during a feed swipe,
+   * clears it only on its own touchmove/touchcancel. We block its touchmoves while we own the gesture,
    * so send it a touchcancel (its handler only clears that timer). touchend is deliberately NOT
    * swallowed: LWC resets its active-touch id there and would ignore every later touch otherwise.
    */
@@ -135,17 +185,24 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     if (startIsTouch && startTarget) startTarget.dispatchEvent(new Event('touchcancel', { bubbles: true }))
   }
 
-  /** Edge-zone touches (item 6) never reach the chart at all, so LWC never arms anything. */
-  function blockTouchStartIfIgnored(e: Event) {
-    if (mode.value === 'ignored') e.stopPropagation()
+  function onTouchStart(e: Event) {
+    // Edge zone and plaque touches never reach the chart, so LWC arms nothing.
+    if (mode.value === 'ignored' || mode.value === 'level') {
+      e.stopPropagation()
+      return
+    }
+    // Long press belongs to levels (item 2): disarm LWC's 240 ms long-tap crosshair right after its
+    // touchstart handler ran, so our 400 ms long press is never pre-empted by tracking mode.
+    if (mode.value === 'pending' && h.onLongPress) setTimeout(cancelChartLongTap, 0)
   }
 
   /**
-   * While we own the gesture (undecided, feed, edge zone, level), stop move events in the capture
-   * phase so lightweight-charts (which listens on its own canvas) never starts panning.
+   * While we own the gesture (undecided, feed, edge zone, level, long press), stop move events in the
+   * capture phase so lightweight-charts (which listens on its own canvas / document) never pans.
    */
   function owned(): boolean {
-    return mode.value === 'pending' || mode.value === 'feed' || mode.value === 'ignored' || mode.value === 'level'
+    const m = mode.value
+    return m === 'pending' || m === 'feed' || m === 'ignored' || m === 'level' || m === 'longpress'
   }
   function blockIfOwned(e: Event) {
     if (owned()) e.stopPropagation()
@@ -156,7 +213,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     ['pointermove', onPointerMove],
     ['pointerup', onPointerEnd],
     ['pointercancel', onPointerEnd],
-    ['touchstart', blockTouchStartIfIgnored],
+    ['touchstart', onTouchStart],
     ['touchmove', blockIfOwned],
     ['mousemove', blockIfOwned],
   ]
@@ -167,6 +224,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     for (const [type, fn] of listeners) node.addEventListener(type, fn as EventListener, { capture: true, passive: true })
   })
   onBeforeUnmount(() => {
+    clearLongPress()
     const node = el.value
     if (!node) return
     for (const [type, fn] of listeners) node.removeEventListener(type, fn as EventListener, { capture: true })

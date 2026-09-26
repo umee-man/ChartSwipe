@@ -2,6 +2,9 @@
 // Candlestick chart for one ticker on lightweight-charts v5 (arch §5.1–5.2).
 // setData from memory on TF switch, live update of the last bar, history paging to the left,
 // chart.remove() on unmount (slide leaves the virtual window).
+// Levels (F4, A16): amber 1 px price lines on every TF, plaques on the left edge (drag / swipe / tap
+// handled by useGestures via FeedPager), magnet for long-press placement, levels included in the
+// Д/Н autoscale.
 import {
   CandlestickSeries,
   ColorType,
@@ -10,19 +13,25 @@ import {
   HistogramSeries,
   TickMarkType,
   TrackingModeExitMode,
+  LineStyle,
+  type AutoscaleInfo,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type LogicalRange,
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts'
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { Candle, Interval } from '~/lib/binance/types'
 import { tickDecimals } from '~/lib/binance/parse'
 import { lastCandle } from '~/lib/candles/merge'
-import { opensZoomedOut } from '~/lib/feed/tf'
+import { opensZoomedOut, tfLabel } from '~/lib/feed/tf'
+import { hitTestLabels, LABEL_H, layoutLabels, type LabelRect } from '~/lib/levels/labels'
+import { magnetPrice } from '~/lib/levels/magnet'
+import { LEVEL_COLOR, levelsPriceRange, roundToTick, type Level } from '~/lib/levels/model'
 import type { SeriesEvent, SeriesStatus } from '~/lib/candles/store'
 import { useCandles } from '~/composables/useCandles'
 
@@ -31,6 +40,13 @@ const props = defineProps<{
   tf: Interval
   showVolume: boolean
   tickSize: number
+  /** Alive levels of this symbol (all TFs). */
+  levels: Level[]
+  /** Current slide: only it lays out plaques and answers hit tests. */
+  active: boolean
+  /** Level being dragged (highlighted) and its swipe-to-delete offset. */
+  dragId?: string | null
+  dragDx?: number
 }>()
 
 const UP = '#26a69a'
@@ -57,6 +73,11 @@ let lastHistoryCheck = 0
  */
 let fitPending = false
 let historyTimer: ReturnType<typeof setTimeout> | null = null
+/** id → price line on the candle series. */
+const priceLines = new Map<string, IPriceLine>()
+/** Plaque rectangles (pane px) for the active slide, recomputed every frame (price scale can move any time). */
+const labelRects = ref<LabelRect[]>([])
+let rafId: number | null = null
 
 const toBar = (c: Candle): CandlestickData<Time> => ({
   time: c.time as UTCTimestamp,
@@ -202,6 +223,149 @@ function priceAxisWidth(): number {
   return chart.value?.priceScale('right').width() ?? 0
 }
 
+// ---------------- levels ----------------
+
+const levelById = computed(() => new Map(props.levels.map((l) => [l.id, l])))
+
+function syncPriceLines() {
+  const series = candleSeries
+  if (!series) return
+  const seen = new Set<string>()
+  for (const l of props.levels) {
+    seen.add(l.id)
+    const opts = {
+      price: l.price,
+      color: l.color ?? LEVEL_COLOR,
+      lineWidth: (l.id === props.dragId ? 2 : 1) as 1 | 2,
+      lineStyle: LineStyle.Solid,
+      axisLabelVisible: true,
+      title: '',
+    }
+    const line = priceLines.get(l.id)
+    if (line) line.applyOptions(opts)
+    else priceLines.set(l.id, series.createPriceLine(opts))
+  }
+  for (const [id, line] of priceLines) {
+    if (seen.has(id)) continue
+    series.removePriceLine(line)
+    priceLines.delete(id)
+  }
+}
+
+/** Pane height without the time axis. */
+function paneHeight(): number {
+  const h = host.value?.clientHeight ?? 0
+  return Math.max(0, h - (chart.value?.timeScale().height() ?? 0))
+}
+
+/** Recompute plaque positions; only commit to Vue state when something actually moved. */
+function layoutPlaques() {
+  const series = candleSeries
+  if (!series || !props.active || props.levels.length === 0) {
+    if (labelRects.value.length) labelRects.value = []
+    return
+  }
+  const next = layoutLabels(
+    props.levels.map((l) => ({ levelId: l.id, y: series.priceToCoordinate(l.price) })),
+    paneHeight(),
+  )
+  const prev = labelRects.value
+  const changed =
+    next.length !== prev.length ||
+    next.some((r, i) => r.levelId !== prev[i]!.levelId || Math.abs(r.top - prev[i]!.top) > 0.5)
+  if (changed) labelRects.value = next
+}
+
+function frame() {
+  rafId = null
+  layoutPlaques()
+  if (props.active && props.levels.length) rafId = requestAnimationFrame(frame)
+}
+function startLayoutLoop() {
+  if (rafId === null && props.active && props.levels.length) rafId = requestAnimationFrame(frame)
+  else if (!props.active || !props.levels.length) layoutPlaques()
+}
+function stopLayoutLoop() {
+  if (rafId !== null) cancelAnimationFrame(rafId)
+  rafId = null
+}
+
+/** Д/Н (A15): the auto price range also covers every level so none is off-screen in the overview. */
+function autoscaleWithLevels(original: () => AutoscaleInfo | null): AutoscaleInfo | null {
+  const res = original()
+  if (!opensZoomedOut(props.tf)) return res
+  const range = levelsPriceRange(props.levels)
+  if (!res?.priceRange || !range) return res
+  return {
+    ...res,
+    priceRange: {
+      minValue: Math.min(res.priceRange.minValue, range.min),
+      maxValue: Math.max(res.priceRange.maxValue, range.max),
+    },
+  }
+}
+
+function toLocal(clientX: number, clientY: number): { x: number; y: number } | null {
+  const r = host.value?.getBoundingClientRect()
+  if (!r) return null
+  return { x: clientX - r.left, y: clientY - r.top }
+}
+
+/** Plaque under a client point (arch §5.3 item 1), or null. */
+function hitLevel(clientX: number, clientY: number): string | null {
+  if (!props.active) return null
+  const p = toLocal(clientX, clientY)
+  if (!p) return null
+  layoutPlaques()
+  return hitTestLabels(labelRects.value, p.x, p.y)?.levelId ?? null
+}
+
+/** Magnet price for a long press at a client point (arch §5.4), or null outside the price pane. */
+function magnetAt(clientX: number, clientY: number): number | null {
+  const series = candleSeries
+  const c = chart.value
+  const p = toLocal(clientX, clientY)
+  if (!series || !c || !p || p.y < 0 || p.y > paneHeight()) return null
+  const plotWidth = (host.value?.clientWidth ?? 0) - priceAxisWidth()
+  if (p.x < 0 || p.x > plotWidth) return null
+  const barIndex = c.timeScale().coordinateToLogical(p.x)
+  const res = magnetPrice({
+    candles: store.get(props.symbol, props.tf)?.candles ?? [],
+    barIndex: barIndex ?? -1e9,
+    y: p.y,
+    priceToY: (price) => series.priceToCoordinate(price),
+    yToPrice: (y) => series.coordinateToPrice(y),
+    tickSize: props.tickSize,
+  })
+  return res?.price ?? null
+}
+
+/** New price when the plaque of a level at `startPrice` is dragged by `dy` px (tick-rounded), or null. */
+function priceForDrag(startPrice: number, dy: number): number | null {
+  const series = candleSeries
+  if (!series) return null
+  const y0 = series.priceToCoordinate(startPrice)
+  if (y0 === null) return null
+  const y = Math.min(Math.max(0, y0 + dy), paneHeight())
+  const price = series.coordinateToPrice(y)
+  if (price === null || !(price > 0)) return null
+  return roundToTick(price, props.tickSize)
+}
+
+const priceDecimals = computed(() => tickDecimals(props.tickSize > 0 ? props.tickSize : 0.01))
+function formatPrice(p: number): string {
+  return p.toLocaleString('ru-RU', { minimumFractionDigits: priceDecimals.value, maximumFractionDigits: priceDecimals.value })
+}
+function plaqueStyle(r: LabelRect): Record<string, string> {
+  const style: Record<string, string> = { top: `${r.top}px`, height: `${LABEL_H}px` }
+  const dx = r.levelId === props.dragId ? (props.dragDx ?? 0) : 0
+  if (dx) {
+    style.transform = `translateX(${dx}px)`
+    style.opacity = String(Math.max(0.25, 1 - dx / 120))
+  }
+  return style
+}
+
 function retry() {
   void store.ensure(props.symbol, props.tf, 0)
 }
@@ -245,6 +409,7 @@ onMounted(() => {
     wickUpColor: UP,
     wickDownColor: DOWN,
     borderVisible: false,
+    autoscaleInfoProvider: autoscaleWithLevels,
   })
   volumeSeries = c.addSeries(HistogramSeries, {
     priceScaleId: 'vol',
@@ -259,7 +424,21 @@ onMounted(() => {
   applyPriceFormat()
   offStore = store.subscribe(onStoreEvent)
   load()
+  syncPriceLines()
+  startLayoutLoop()
 })
+
+watch(
+  () => [props.levels, props.dragId] as const,
+  () => {
+    syncPriceLines()
+    startLayoutLoop()
+  },
+)
+watch(
+  () => props.active,
+  (a) => (a ? startLayoutLoop() : stopLayoutLoop()),
+)
 
 watch(
   () => props.tf,
@@ -275,6 +454,8 @@ watch(
 watch(() => props.tickSize, applyPriceFormat)
 
 onBeforeUnmount(() => {
+  stopLayoutLoop()
+  priceLines.clear()
   offStore?.()
   if (historyTimer) clearTimeout(historyTimer)
   chart.value?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
@@ -284,12 +465,25 @@ onBeforeUnmount(() => {
   volumeSeries = null
 })
 
-defineExpose({ resetView, priceAxisWidth, clearCrosshair })
+defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, priceForDrag })
 </script>
 
 <template>
   <div class="chart-view">
     <div ref="host" class="chart-host" />
+    <div v-if="active && labelRects.length" class="plaques" aria-hidden="true">
+      <div
+        v-for="r in labelRects"
+        :key="r.levelId"
+        class="plaque"
+        :class="{ dragging: r.levelId === dragId }"
+        :style="plaqueStyle(r)"
+      >
+        <span class="price">{{ formatPrice(levelById.get(r.levelId)?.price ?? 0) }}</span>
+        <span class="tf">{{ tfLabel(levelById.get(r.levelId)?.tf ?? '') }}</span>
+        <span v-if="levelById.get(r.levelId)?.note" class="note">{{ levelById.get(r.levelId)?.note }}</span>
+      </div>
+    </div>
     <div v-if="status === 'loading' || status === 'idle'" class="chart-overlay">Загрузка свечей {{ symbol }}…</div>
     <div v-else-if="status === 'error'" class="chart-overlay">
       <span>Не удалось загрузить свечи {{ symbol }}</span>
@@ -308,6 +502,43 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair })
 .chart-host {
   position: absolute;
   inset: 0;
+}
+.plaques {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* hit-testing is geometric (lib/levels/labels.ts) via useGestures */
+  overflow: hidden;
+}
+.plaque {
+  position: absolute;
+  left: 4px;
+  max-width: 146px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(255, 179, 0, 0.16);
+  border: 1px solid rgba(255, 179, 0, 0.55);
+  color: #ffcf57;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.plaque.dragging {
+  background: rgba(255, 179, 0, 0.32);
+  border-color: #ffb300;
+}
+.plaque .tf {
+  font-size: 9px;
+  opacity: 0.75;
+}
+.plaque .note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  opacity: 0.85;
 }
 .chart-overlay {
   position: absolute;

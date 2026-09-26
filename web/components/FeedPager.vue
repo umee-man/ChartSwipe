@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // Vertical virtual feed: only 3 slides (prev / current / next) live in the DOM (arch §5.2).
 // Custom pager with CSS transforms instead of Swiper (ADR A11); every gesture decision is made
-// by useGestures (arch §5.3), the pager just animates.
+// by useGestures (arch §5.3), the pager just animates and routes level gestures (F4) to the store.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { domSlots } from '~/lib/feed/window'
-import { rubberBand, type GestureTarget } from '~/lib/gestures/arbiter'
+import { isDeleteSwipe, levelDragIntent, rubberBand, type GestureTarget } from '~/lib/gestures/arbiter'
+import type { Level } from '~/lib/levels/model'
 import { useGestures } from '~/composables/useGestures'
 import { useFeedStore } from '~/stores/feed'
+import { useLevelsStore } from '~/stores/levels'
 import { useSettingsStore } from '~/stores/settings'
 import FeedSlide from './FeedSlide.vue'
 
@@ -14,6 +16,19 @@ const ANIM_MS = 220
 
 const feed = useFeedStore()
 const settings = useSettingsStore()
+const levels = useLevelsStore()
+
+const NO_LEVELS: Level[] = []
+/** Alive levels per symbol; recomputed only when levels change (stable arrays for ChartView watchers). */
+const levelsBySymbol = computed(() => {
+  const map = new Map<string, Level[]>()
+  for (const l of levels.alive) {
+    const arr = map.get(l.symbol)
+    if (arr) arr.push(l)
+    else map.set(l.symbol, [l])
+  }
+  return map
+})
 
 const root = ref<HTMLDivElement | null>(null)
 const offset = ref(0)
@@ -35,7 +50,14 @@ const emptyText = computed(() => {
 const hasPrev = computed(() => feed.currentIndex > 0)
 const hasNext = computed(() => feed.currentIndex < feed.symbols.length - 1)
 
-type SlideApi = { resetView: () => void; priceAxisWidth: () => number; clearCrosshair: () => void }
+type SlideApi = {
+  resetView: () => void
+  priceAxisWidth: () => number
+  clearCrosshair: () => void
+  hitLevel: (x: number, y: number) => string | null
+  magnetAt: (x: number, y: number) => number | null
+  priceForDrag: (startPrice: number, dy: number) => number | null
+}
 const slideRefs = new Map<string, SlideApi>()
 function setSlideRef(symbol: string, el: unknown) {
   if (el) slideRefs.set(symbol, el as SlideApi)
@@ -97,6 +119,12 @@ useGestures(root, {
     currentSlide()?.resetView()
   },
   hitTest(e): GestureTarget {
+    // Item 1: finger on a level plaque → level mode (feed and pan locked).
+    const id = currentSlide()?.hitLevel(e.clientX, e.clientY)
+    if (id) {
+      levels.startDrag(id)
+      return 'level'
+    }
     // Vertical drag on the price axis scales price (arch §5.3 item 5) → chart owns it.
     const rect = root.value?.getBoundingClientRect()
     const slideEl = root.value?.querySelector<HTMLElement>('.slide.is-current .feed-slide')
@@ -104,8 +132,45 @@ useGestures(root, {
     const chartRight = slideEl.getBoundingClientRect().right
     const axis = currentSlide()?.priceAxisWidth() ?? 0
     if (e.clientX <= chartRight && e.clientX >= chartRight - axis) return 'priceAxis'
-    // Days 4–6: return 'level' when the pointer is on a level label (item 1).
     return 'none'
+  },
+  // Item 2: long press 400 ms → new level at the magnet price (§5.4) on the active TF.
+  onLongPress({ x, y }) {
+    const symbol = feed.currentSymbol
+    const price = currentSlide()?.magnetAt(x, y)
+    if (!symbol || price == null) return
+    if (levels.add(symbol, price, settings.activeTf)) {
+      try {
+        navigator.vibrate?.(15)
+      } catch {
+        // vibration is optional (not on iOS)
+      }
+    }
+  },
+  // Item 1: drag the plaque vertically → move; swipe it right > 60 px → delete (undo toast).
+  onLevelMove(dx, dy) {
+    const d = levels.drag
+    if (!d) return
+    if (!d.intent) d.intent = levelDragIntent(dx, dy)
+    if (d.intent === 'move') {
+      const price = currentSlide()?.priceForDrag(d.original.price, dy)
+      if (price != null) levels.dragTo(price)
+    } else if (d.intent === 'swipe') {
+      d.dx = Math.max(0, dx)
+    }
+  },
+  onLevelEnd(dx, _dy, { tap, cancelled }) {
+    const d = levels.drag
+    if (!d) return
+    if (tap) {
+      levels.endDrag(false)
+      levels.editingId = d.id // tap → level sheet (note / delete)
+    } else if (d.intent === 'swipe' && !cancelled && isDeleteSwipe(dx)) {
+      levels.endDrag(false)
+      levels.remove(d.id)
+    } else {
+      levels.endDrag(!cancelled && d.intent === 'move')
+    }
   },
 })
 
@@ -144,6 +209,10 @@ defineExpose({ go, resetCurrent: () => nextTick(() => currentSlide()?.resetView(
           :tf="settings.activeTf"
           :show-volume="settings.showVolume"
           :tick-size="feed.tickSize(slot.symbol)"
+          :levels="levelsBySymbol.get(slot.symbol) ?? NO_LEVELS"
+          :active="slot.offset === 0"
+          :drag-id="slot.offset === 0 ? (levels.drag?.id ?? null) : null"
+          :drag-dx="slot.offset === 0 ? (levels.drag?.dx ?? 0) : 0"
         />
       </div>
     </div>

@@ -1,19 +1,20 @@
 <script setup lang="ts">
-// Bottom action row under the TF bar (ADR A14, arch §5.8): favorite, hide, level type selector
-// (state only for now), favorites list, screenshot stub. Lives outside the feed pager, so touches here
-// never reach the gesture arbiter — taps are plain clicks and swipes do nothing.
+// Bottom action row under the TF bar (ADR A14, arch §5.8): favorite, hide, levels list, favorites list,
+// screenshot stub. Since A16 there is a single level type, so the type selector is gone; levels are
+// placed by a long press on the chart. Lives outside the feed pager, so touches here never reach the
+// gesture arbiter — taps are plain clicks and swipes do nothing.
 import { computed } from 'vue'
-import { LEVEL_KINDS, useLevelsStore } from '~/stores/levels'
+import { useLevelsStore } from '~/stores/levels'
 import { useWatchlistsStore } from '~/stores/watchlists'
 
 const props = defineProps<{ symbol: string | undefined }>()
-const emit = defineEmits<{ hidden: [symbol: string]; 'open-favorites': [] }>()
+const emit = defineEmits<{ hidden: [symbol: string]; 'open-favorites': []; 'open-levels': [] }>()
 
 const watchlists = useWatchlistsStore()
 const levels = useLevelsStore()
 
 const isFav = computed(() => (props.symbol ? watchlists.isFavorite(props.symbol) : false))
-const kind = computed(() => LEVEL_KINDS.find((k) => k.kind === levels.selectedKind) ?? LEVEL_KINDS[0]!)
+const levelCount = computed(() => levels.alive.length)
 
 function hide() {
   if (!props.symbol) return
@@ -56,16 +57,15 @@ function hide() {
 
     <button
       type="button"
-      class="act"
-      :aria-label="`Тип уровня: ${kind.label}. Нажмите, чтобы сменить`"
-      :style="{ color: kind.color }"
-      @click="levels.cycleKind()"
+      class="act levels"
+      :aria-label="`Уровни: ${levelCount}. Чтобы поставить уровень, удерживайте палец на графике`"
+      @click="emit('open-levels')"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <rect v-if="kind.kind === 'zone'" x="3" y="8" width="18" height="8" rx="1.5" fill="currentColor" fill-opacity="0.3" />
-        <path v-else d="M3 12h18" />
+        <path d="M3 8h18" />
+        <path d="M3 16h18" stroke-dasharray="3 3" />
       </svg>
-      <span>{{ kind.label }}</span>
+      <span>Уровни{{ levelCount ? ` ${levelCount}` : '' }}</span>
     </button>
 
     <button type="button" class="act" aria-label="Список избранного" @click="emit('open-favorites')">
@@ -130,6 +130,9 @@ function hide() {
 .act:active:not(:disabled) {
   background: var(--surface-2);
   border-radius: 10px;
+}
+.act.levels {
+  color: #ffb300;
 }
 .act.on {
   color: #f5c518;

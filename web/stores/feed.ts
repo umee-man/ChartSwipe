@@ -6,7 +6,7 @@ import { describeError, fetchExchangeInfo, fetchTickers24h } from '~/lib/binance
 import type { SymbolInfo, Ticker24h } from '~/lib/binance/types'
 import { readExchangeInfo, writeExchangeInfo } from '~/lib/cache/candles'
 import { FEED_SOURCES, symbolsForSource, type FeedSourceId } from '~/lib/feed/sources'
-import { clampIndex } from '~/lib/feed/window'
+import { clampIndex, withFocused } from '~/lib/feed/window'
 import { loadJson, saveJson } from '~/lib/storage'
 import { useWatchlistsStore } from './watchlists'
 
@@ -39,6 +39,8 @@ export const useFeedStore = defineStore('feed', {
       initialized: false,
       /** First ticker/exchangeInfo round finished (success or failure) — drives the loading text. */
       ready: false,
+      /** Tickers opened from the levels list that the current source does not contain (reset on source change). */
+      focused: [] as string[],
     }
   },
   getters: {
@@ -50,7 +52,10 @@ export const useFeedStore = defineStore('feed', {
         this.source === 'favorites'
           ? symbolsForSource('favorites', { tickers: [], favorites: wl.favorites, exchangeInfo: this.exchangeInfo })
           : this.baseList
-      return base.filter((s) => !hidden.has(s))
+      return withFocused(
+        base.filter((s) => !hidden.has(s)),
+        this.focused,
+      )
     },
     currentIndex(): number {
       return clampIndex(this.index, this.symbols.length)
@@ -135,7 +140,14 @@ export const useFeedStore = defineStore('feed', {
       })
     },
 
+    /** Jump to a ticker (levels list). If the current source lacks it, it is put in front of the feed. */
+    focusSymbol(symbol: string) {
+      if (!this.symbols.includes(symbol)) this.focused = [symbol]
+      this.setIndex(this.symbols.indexOf(symbol))
+    },
+
     async setSource(id: FeedSourceId) {
+      this.focused = []
       this.source = id
       saveJson(SOURCE_KEY, id)
       this.index = 0

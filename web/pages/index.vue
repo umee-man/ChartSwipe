@@ -5,16 +5,20 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { liveSymbols, memorySymbols, preloadSymbols } from '~/lib/feed/window'
 import { useCandles } from '~/composables/useCandles'
 import { useFeedStore } from '~/stores/feed'
+import { useLevelsStore } from '~/stores/levels'
 import { useSettingsStore } from '~/stores/settings'
 import { useWatchlistsStore } from '~/stores/watchlists'
 
 /** "Stopped on a slide" = index unchanged for this long; then preload neighbours. */
 const SETTLE_MS = 250
 const UNDO_MS = 4000
+/** Level delete undo window (arch §5.3 item 1). */
+const LEVEL_UNDO_MS = 5000
 
 const feed = useFeedStore()
 const settings = useSettingsStore()
 const watchlists = useWatchlistsStore()
+const levels = useLevelsStore()
 const candles = useCandles()
 
 let settleTimer: ReturnType<typeof setTimeout> | null = null
@@ -43,6 +47,17 @@ watch(
 
 const favoritesOpen = ref(false)
 const hiddenOpen = ref(false)
+const levelsOpen = ref(false)
+
+// Level deleted (swipe / sheet / list) → «Отменить» for 5 s.
+let levelUndoTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => levels.lastDeleted,
+  (l) => {
+    if (levelUndoTimer) clearTimeout(levelUndoTimer)
+    levelUndoTimer = l ? setTimeout(() => levels.clearUndo(), LEVEL_UNDO_MS) : null
+  },
+)
 
 // Hide with undo toast.
 const lastHidden = ref<string | null>(null)
@@ -57,10 +72,14 @@ function undoHide() {
   lastHidden.value = null
 }
 
-onMounted(() => void feed.init())
+onMounted(() => {
+  void feed.init()
+  void levels.init()
+})
 onBeforeUnmount(() => {
   if (settleTimer) clearTimeout(settleTimer)
   if (undoTimer) clearTimeout(undoTimer)
+  if (levelUndoTimer) clearTimeout(levelUndoTimer)
 })
 </script>
 
@@ -68,16 +87,31 @@ onBeforeUnmount(() => {
   <main class="feed">
     <FeedHeader @open-favorites="favoritesOpen = true" @open-hidden="hiddenOpen = true" />
     <FeedPager>
-      <div v-if="lastHidden" class="toast" data-gesture-ignore>
+      <div v-if="!levels.hintSeen && feed.currentSymbol" class="hint" data-gesture-ignore>
+        <span>Удерживайте палец на графике, чтобы поставить уровень</span>
+        <button type="button" @click="levels.dismissHint()">Понятно</button>
+      </div>
+      <div v-if="levels.lastDeleted" class="toast" data-gesture-ignore>
+        <span>Уровень удалён</span>
+        <button type="button" @click="levels.undoDelete()">Отменить</button>
+      </div>
+      <div v-else-if="lastHidden" class="toast" data-gesture-ignore>
         <span>{{ lastHidden }} скрыт</span>
         <button type="button" @click="undoHide">Вернуть</button>
       </div>
       <div v-if="feed.error && feed.symbols.length > 0" class="toast error" data-gesture-ignore>Binance: {{ feed.error }}</div>
     </FeedPager>
     <TfBar />
-    <ActionBar :symbol="feed.currentSymbol" @hidden="onHidden" @open-favorites="favoritesOpen = true" />
+    <ActionBar
+      :symbol="feed.currentSymbol"
+      @hidden="onHidden"
+      @open-favorites="favoritesOpen = true"
+      @open-levels="levelsOpen = true"
+    />
     <FavoritesSheet v-if="favoritesOpen" @close="favoritesOpen = false" />
     <HiddenSheet v-if="hiddenOpen" @close="hiddenOpen = false" />
+    <LevelsSheet v-if="levelsOpen" @close="levelsOpen = false" />
+    <LevelSheet />
   </main>
 </template>
 
@@ -105,6 +139,34 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   font-size: 14px;
   white-space: nowrap;
+}
+.hint {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 179, 0, 0.14);
+  border: 1px solid rgba(255, 179, 0, 0.6);
+  color: #ffcf57;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.hint button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #ffb300;
+  color: #0b0e11;
+  font-weight: 600;
 }
 .toast button {
   color: var(--accent);
