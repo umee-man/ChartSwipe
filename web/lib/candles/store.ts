@@ -1,6 +1,6 @@
 // In-memory candle repository (framework-free). Holds candles for the ±3 ticker window (arch §5.2),
 // hydrates from IndexedDB first, then fetches the fresh tail; pages history to the left on demand.
-import { fetchKlines, KLINES_LIMIT, rateLimitGate } from '../binance/rest'
+import { describeError, fetchKlines, KLINES_LIMIT, rateLimitGate } from '../binance/rest'
 import type { Candle, Interval } from '../binance/types'
 import { readCandles, writeCandles } from '../cache/candles'
 import { applyLiveCandle, intervalSeconds, mergeCandles, mergeFreshTail } from './merge'
@@ -135,7 +135,7 @@ export class CandleStore {
       void writeCandles(symbol, tf, s.candles)
     } catch (err) {
       this.reattach(s)
-      s.error = err instanceof Error ? err.message : String(err)
+      s.error = describeError(err)
       // Keep showing cached candles if we have them.
       s.status = s.candles.length ? 'ready' : 'error'
       this.emit(s, 'status')

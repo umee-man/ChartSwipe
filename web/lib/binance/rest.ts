@@ -103,3 +103,20 @@ export async function fetchTickers24h(signal?: AbortSignal): Promise<Ticker24h[]
 export async function fetchExchangeInfo(signal?: AbortSignal): Promise<Record<string, SymbolInfo>> {
   return parseExchangeInfo(await getJson('/fapi/v1/exchangeInfo', undefined, signal))
 }
+
+/** Human-readable (RU) reason for a failed Binance request, shown on screen for diagnostics. */
+export function describeError(err: unknown): string {
+  if (err instanceof BinanceHttpError) {
+    if (err.isRateLimited) return `лимит запросов Binance (HTTP ${err.status}), пауза ~${Math.ceil(rateLimitGate.remaining() / 1000)} с`
+    if (err.status === 451 || err.status === 403) return `доступ к Binance из этой сети/региона закрыт (HTTP ${err.status})`
+    if (err.status >= 500) return `сбой на стороне Binance (HTTP ${err.status})`
+    return `ответ Binance HTTP ${err.status} (${err.path})`
+  }
+  if (err instanceof Error) {
+    if (err.name === 'AbortError') return 'запрос отменён'
+    // fetch network failures: Chrome "Failed to fetch", Safari "Load failed", Firefox "NetworkError…"
+    if (err.name === 'TypeError') return `нет сети или запрос заблокирован (${err.message})`
+    return err.message
+  }
+  return String(err)
+}

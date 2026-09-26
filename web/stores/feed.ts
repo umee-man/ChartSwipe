@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { fallbackTickSize } from '~/lib/binance/parse'
-import { fetchExchangeInfo, fetchTickers24h } from '~/lib/binance/rest'
+import { describeError, fetchExchangeInfo, fetchTickers24h } from '~/lib/binance/rest'
 import type { SymbolInfo, Ticker24h } from '~/lib/binance/types'
 import { readExchangeInfo, writeExchangeInfo } from '~/lib/cache/candles'
 import { FEED_SOURCES, symbolsForSource, type FeedSourceId } from '~/lib/feed/sources'
@@ -37,6 +37,8 @@ export const useFeedStore = defineStore('feed', {
       exchangeInfo: null as Record<string, SymbolInfo> | null,
       error: null as string | null,
       initialized: false,
+      /** First ticker/exchangeInfo round finished (success or failure) — drives the loading text. */
+      ready: false,
     }
   },
   getters: {
@@ -64,9 +66,13 @@ export const useFeedStore = defineStore('feed', {
       this.initialized = true
       // Watchlist can render immediately, before any network.
       if (this.source === 'watchlist') this.rebuild()
-      await Promise.all([this.loadExchangeInfo(), this.refreshTickers()])
-      if (this.baseList.length === 0 || this.source === 'watchlist') this.rebuild()
-      this.startPolling()
+      try {
+        await Promise.all([this.loadExchangeInfo(), this.refreshTickers()])
+        if (this.baseList.length === 0 || this.source === 'watchlist') this.rebuild()
+      } finally {
+        this.ready = true
+        this.startPolling()
+      }
     },
 
     /** Cached (24 h) exchangeInfo, else network. Concurrent calls share one request. */
@@ -82,7 +88,7 @@ export const useFeedStore = defineStore('feed', {
           this.exchangeInfo = markRaw(info)
           void writeExchangeInfo(info)
         } catch (err) {
-          this.error = err instanceof Error ? err.message : String(err)
+          this.error = describeError(err)
         }
       })().finally(() => {
         exchangeInfoLoading = null
@@ -101,7 +107,7 @@ export const useFeedStore = defineStore('feed', {
         // exchangeInfo failed earlier (network/429) — retry piggy-backed on the ticker poll.
         if (!this.exchangeInfo && this.initialized) void this.loadExchangeInfo()
       } catch (err) {
-        this.error = err instanceof Error ? err.message : String(err)
+        this.error = describeError(err)
       }
     },
 

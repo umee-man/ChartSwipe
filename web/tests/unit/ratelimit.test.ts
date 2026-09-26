@@ -86,3 +86,16 @@ describe('withTimeout (IndexedDB open guard)', () => {
     await expect(withTimeout(Promise.resolve(7), 500)).resolves.toBe(7)
   })
 })
+
+describe('describeError', () => {
+  afterEach(() => rateLimitGate.reset())
+  it('explains HTTP failures in Russian', async () => {
+    const { describeError } = await import('../../lib/binance/rest')
+    expect(describeError(new BinanceHttpError(451, '/fapi/v1/klines', ''))).toContain('региона')
+    expect(describeError(new BinanceHttpError(503, '/x', ''))).toContain('сбой на стороне Binance')
+    rateLimitGate.record(429, '30', Date.now())
+    expect(describeError(new BinanceHttpError(429, '/x', ''))).toMatch(/лимит запросов.*30 с/)
+    expect(describeError(new TypeError('Load failed'))).toBe('нет сети или запрос заблокирован (Load failed)')
+    expect(describeError('x')).toBe('x')
+  })
+})

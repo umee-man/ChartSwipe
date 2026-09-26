@@ -69,6 +69,7 @@ async function openFeed() {
 }
 .sheet {
   width: 100%;
+  max-height: 80vh;
   max-height: 80dvh;
   display: flex;
   flex-direction: column;

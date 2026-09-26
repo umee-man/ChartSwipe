@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import type { Interval } from '~/lib/binance/types'
 import { klineStream, WsManager } from '~/lib/binance/ws'
+import { lastCandle } from '~/lib/candles/merge'
 import { CandleStore } from '~/lib/candles/store'
 
 let candleStore: CandleStore | null = null
@@ -44,7 +45,7 @@ export function useLastPrice(symbol: Ref<string | undefined>, tf: Ref<Interval>)
 
   const read = () => {
     const sym = symbol.value
-    const last = sym ? store.get(sym, tf.value)?.candles.at(-1) : undefined
+    const last = sym ? lastCandle(store.get(sym, tf.value)?.candles) : undefined
     price.value = last ? last.close : null
   }
   const off = store.subscribe((e) => {

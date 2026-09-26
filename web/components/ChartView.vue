@@ -21,6 +21,7 @@ import {
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { Candle, Interval } from '~/lib/binance/types'
 import { tickDecimals } from '~/lib/binance/parse'
+import { lastCandle } from '~/lib/candles/merge'
 import type { SeriesEvent, SeriesStatus } from '~/lib/candles/store'
 import { useCandles } from '~/composables/useCandles'
 
@@ -43,6 +44,7 @@ const HISTORY_CHECK_MS = 500
 const { store } = useCandles()
 const host = ref<HTMLDivElement | null>(null)
 const status = ref<SeriesStatus>('idle')
+const errorText = ref<string | null>(null)
 const chart = shallowRef<IChartApi | null>(null)
 let candleSeries: ISeriesApi<'Candlestick'> | null = null
 let volumeSeries: ISeriesApi<'Histogram'> | null = null
@@ -89,16 +91,22 @@ function applyPriceFormat() {
 }
 
 /** Full redraw from memory. Cheap enough (< 100 ms for ~1–2k bars) for TF switches. */
-function renderAll() {
+function syncStatus() {
   const s = store.get(props.symbol, props.tf)
   status.value = s?.status ?? 'idle'
+  errorText.value = s?.error ?? null
+}
+
+function renderAll() {
+  const s = store.get(props.symbol, props.tf)
+  syncStatus()
   const candles = s?.candles ?? []
   candleSeries?.setData(candles.map(toBar))
   volumeSeries?.setData(candles.map(toVol))
 }
 
 function renderLive() {
-  const last = store.get(props.symbol, props.tf)?.candles.at(-1)
+  const last = lastCandle(store.get(props.symbol, props.tf)?.candles)
   if (!last || !candleSeries || !volumeSeries) return
   candleSeries.update(toBar(last))
   volumeSeries.update(toVol(last))
@@ -117,7 +125,7 @@ function onStoreEvent(e: SeriesEvent) {
   if (e.kind === 'live') renderLive()
   else if (e.kind === 'prepend') renderPrepend(e.added ?? 0)
   else if (e.kind === 'reset') renderAll()
-  else status.value = store.get(props.symbol, props.tf)?.status ?? 'idle'
+  else syncStatus()
 }
 
 function checkHistory() {
@@ -249,9 +257,10 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair })
 <template>
   <div class="chart-view">
     <div ref="host" class="chart-host" />
-    <div v-if="status === 'loading'" class="chart-overlay">Загрузка…</div>
+    <div v-if="status === 'loading' || status === 'idle'" class="chart-overlay">Загрузка свечей {{ symbol }}…</div>
     <div v-else-if="status === 'error'" class="chart-overlay">
-      <span>Не удалось загрузить свечи</span>
+      <span>Не удалось загрузить свечи {{ symbol }}</span>
+      <span class="reason">Binance недоступен: {{ errorText ?? 'неизвестная ошибка' }}</span>
       <button type="button" class="retry" @click="retry">Повторить</button>
     </div>
   </div>
@@ -278,6 +287,12 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair })
   color: var(--text-dim);
   font-size: 14px;
   pointer-events: none;
+}
+.reason {
+  max-width: 90%;
+  text-align: center;
+  font-size: 12px;
+  word-break: break-word;
 }
 .retry {
   pointer-events: auto;

@@ -23,6 +23,15 @@ let animTimer: ReturnType<typeof setTimeout> | null = null
 let pendingDir: -1 | 0 | 1 = 0
 
 const slots = computed(() => domSlots(feed.symbols, feed.currentIndex))
+
+/** Never a black void: say what is happening when there is nothing to show. */
+const emptyText = computed(() => {
+  if (!feed.ready) return 'Загрузка списка тикеров…'
+  if (feed.error && feed.source !== 'favorites') return `Binance недоступен: ${feed.error}`
+  if (feed.source === 'movers') return 'Сегодня нет монет с движением больше 5%'
+  if (feed.source === 'favorites') return 'В избранном пока пусто — отмечайте тикеры звёздочкой'
+  return 'Список пуст'
+})
 const hasPrev = computed(() => feed.currentIndex > 0)
 const hasNext = computed(() => feed.currentIndex < feed.symbols.length - 1)
 
@@ -138,9 +147,7 @@ defineExpose({ go, resetCurrent: () => nextTick(() => currentSlide()?.resetView(
         />
       </div>
     </div>
-    <div v-if="feed.symbols.length === 0" class="empty">
-      {{ feed.source === 'movers' ? 'Сегодня нет монет с движением больше 5%' : 'Список пуст' }}
-    </div>
+    <div v-if="feed.symbols.length === 0" class="empty">{{ emptyText }}</div>
     <slot />
   </div>
 </template>

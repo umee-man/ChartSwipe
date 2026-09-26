@@ -74,3 +74,8 @@ export function intervalSeconds(interval: string): number {
   if (!m) throw new Error(`Unknown interval ${interval}`)
   return Number(m[1]) * UNIT_SEC[m[2]!]!
 }
+
+/** Last element without Array.prototype.at (missing before iOS Safari 15.4). */
+export function lastCandle(arr: readonly Candle[] | undefined): Candle | undefined {
+  return arr && arr.length ? arr[arr.length - 1] : undefined
+}

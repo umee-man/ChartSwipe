@@ -70,7 +70,7 @@ onBeforeUnmount(() => {
         <span>{{ lastHidden }} скрыт</span>
         <button type="button" @click="undoHide">Вернуть</button>
       </div>
-      <div v-if="feed.error && feed.symbols.length === 0" class="toast error">Нет связи с Binance</div>
+      <div v-if="feed.error && feed.symbols.length > 0" class="toast error" data-gesture-ignore>Binance: {{ feed.error }}</div>
     </FeedPager>
     <TfBar />
     <FavoritesSheet v-if="favoritesOpen" @close="favoritesOpen = false" />
@@ -81,6 +81,7 @@ onBeforeUnmount(() => {
 .feed {
   display: flex;
   flex-direction: column;
+  height: 100vh; /* fallback for browsers without dvh */
   height: 100dvh;
   width: 100%;
   overflow: hidden;
@@ -107,5 +108,9 @@ onBeforeUnmount(() => {
 }
 .toast.error {
   color: var(--down);
+  white-space: normal;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  font-size: 12px;
 }
 </style>
