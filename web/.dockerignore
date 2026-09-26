@@ -1,0 +1,19 @@
+# Keep the build context small and never ship local artefacts or secrets.
+node_modules
+.nuxt
+.output
+.data
+.cache
+dist
+coverage
+tests
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+Dockerfile
+.dockerignore

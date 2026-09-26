@@ -190,4 +190,9 @@ MVP-эндпоинты: `levels` (GET/POST/PATCH/DELETE), `watchlists` (GET/PUT)
 
 ## 11. Деплой
 
-Docker-образы `web` (статическая сборка Nuxt за nginx) и `api` (uvicorn) → Dokploy на существующем VPS, HTTPS обязателен (PWA + WebRequest MT5). Supabase — облачный проект. Sentry — клиент и API.
+Docker-образы `web` и `api` (uvicorn) → Dokploy на существующем VPS, HTTPS обязателен (SW, буфер обмена, WebRequest MT5). Supabase — облачный проект. Sentry — клиент и API.
+
+- **`web`** (`web/Dockerfile`): multi-stage `node:24-alpine` — `npm ci` + `nuxi build` → runtime-слой копирует только `.output`, запуск `node .output/server/index.mjs` (Nitro node-server, SPA-оболочка на любой путь), пользователь `node`, `HOST=0.0.0.0`, `PORT=3000`, `HEALTHCHECK` на `/`. Без nginx: TLS и домен — на прокси Dokploy (Traefik) → контейнер :3000.
+- **Кэш-заголовки** — через Nitro `routeRules` в `nuxt.config.ts`: `/_nuxt/**` — `max-age=31536000, immutable` (хэшированные бандлы); `/`, `/sw.js`, `/manifest.webmanifest` — `no-cache`, чтобы деплой применялся сразу.
+- **Совместимость браузеров:** сборка транспилируется до `es2020 / Safari 14 / Chrome 87` (JS и CSS, `vite.build.target/cssTarget`).
+- **Диагностика на экране:** инлайн-скрипт `web/diagnostics/early-errors.js` в `<head>` показывает оверлей «Ошибка» (window error / unhandledrejection / ошибки Vue, таймаут запуска 20 с) — даже если бандл не загрузился.
