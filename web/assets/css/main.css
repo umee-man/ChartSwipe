@@ -1,0 +1,62 @@
+/* ChartSwipe — mobile-first dark theme. Works in a normal browser tab with browser UI visible (ADR A9). */
+:root {
+  color-scheme: dark;
+  --bg: #0b0e11;
+  --surface: #12161b;
+  --surface-2: #1c222a;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #e8eaed;
+  --text-dim: #8a929c;
+  --accent: #f0b90b;
+  --up: #26a69a;
+  --down: #ef5350;
+
+  --header-h: 48px;
+  --tfbar-h: 64px;
+  --actions-w: 52px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#__nuxt {
+  margin: 0;
+  height: 100%;
+  /* 100dvh tracks the visible viewport as mobile browser bars show/hide. */
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  /* No page scroll, no pull-to-refresh, no scroll chaining. */
+  overscroll-behavior: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  /* Buttons get fast taps (no double-tap-zoom delay) but never pan the page. */
+  touch-action: manipulation;
+}
+
+button:disabled {
+  cursor: default;
+}
