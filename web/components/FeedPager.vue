@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { domSlots } from '~/lib/feed/window'
 import { isDeleteSwipe, levelDragIntent, rubberBand, type GestureTarget } from '~/lib/gestures/arbiter'
 import type { Level } from '~/lib/levels/model'
+import type { MagnetResult } from '~/lib/levels/magnet'
 import { useGestures } from '~/composables/useGestures'
 import { useFeedStore } from '~/stores/feed'
 import { useLevelsStore } from '~/stores/levels'
@@ -55,9 +56,23 @@ type SlideApi = {
   priceAxisWidth: () => number
   clearCrosshair: () => void
   hitLevel: (x: number, y: number) => string | null
-  magnetAt: (x: number, y: number) => number | null
-  priceForDrag: (startPrice: number, dy: number) => number | null
+  magnetAt: (x: number, y: number, pointerType: string, touchRadius: number) => MagnetResult | null
+  priceForDrag: (startPrice: number, dy: number, x: number, pointerType: string, touchRadius: number) => MagnetResult | null
 }
+
+/** Haptics (A17): plain placement 15 ms, snapped to a wick — a stronger double pulse. */
+const VIBRATE_PLACE = 15
+const VIBRATE_SNAP = [10, 30, 10]
+const VIBRATE_DRAG_SNAP = 10
+function vibrate(pattern: number | number[]) {
+  try {
+    navigator.vibrate?.(pattern)
+  } catch {
+    // vibration is optional (not on iOS)
+  }
+}
+/** Last wick a dragged level locked to — vibrate only when it changes. */
+let dragSnapKey: string | null = null
 const slideRefs = new Map<string, SlideApi>()
 function setSlideRef(symbol: string, el: unknown) {
   if (el) slideRefs.set(symbol, el as SlideApi)
@@ -135,26 +150,28 @@ useGestures(root, {
     return 'none'
   },
   // Item 2: long press 400 ms → new level at the magnet price (§5.4) on the active TF.
-  onLongPress({ x, y }) {
+  onLongPress({ x, y, pointerType }) {
     const symbol = feed.currentSymbol
-    const price = currentSlide()?.magnetAt(x, y)
-    if (!symbol || price == null) return
-    if (levels.add(symbol, price, settings.activeTf)) {
-      try {
-        navigator.vibrate?.(15)
-      } catch {
-        // vibration is optional (not on iOS)
-      }
-    }
+    const res = currentSlide()?.magnetAt(x, y, pointerType, settings.magnetRadius)
+    if (!symbol || !res) return
+    if (levels.add(symbol, res.price, settings.activeTf)) vibrate(res.snapped ? VIBRATE_SNAP : VIBRATE_PLACE)
   },
   // Item 1: drag the plaque vertically → move; swipe it right > 60 px → delete (undo toast).
-  onLevelMove(dx, dy) {
+  onLevelMove(dx, dy, { x, pointerType }) {
     const d = levels.drag
     if (!d) return
-    if (!d.intent) d.intent = levelDragIntent(dx, dy)
+    if (!d.intent) {
+      d.intent = levelDragIntent(dx, dy)
+      dragSnapKey = null
+    }
     if (d.intent === 'move') {
-      const price = currentSlide()?.priceForDrag(d.original.price, dy)
-      if (price != null) levels.dragTo(price)
+      // The line follows dy; the magnet locks it onto a wick near the finger's x (A17).
+      const res = currentSlide()?.priceForDrag(d.original.price, dy, x, pointerType, settings.magnetRadius)
+      if (!res) return
+      levels.dragTo(res.price)
+      const key = res.snapped ? `${res.barIndex}:${res.price}` : null
+      if (key && key !== dragSnapKey) vibrate(VIBRATE_DRAG_SNAP)
+      dragSnapKey = key
     } else if (d.intent === 'swipe') {
       d.dx = Math.max(0, dx)
     }

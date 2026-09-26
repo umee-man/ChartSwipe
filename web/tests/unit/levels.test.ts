@@ -3,7 +3,9 @@ import type { Candle } from '../../lib/binance/types'
 import { mergeByUpdatedAt } from '../../lib/cache/levels'
 import { exceedsLongPressSlop, isDeleteSwipe, levelDragIntent } from '../../lib/gestures/arbiter'
 import { hitTestLabels, LABEL_H, layoutLabels } from '../../lib/levels/labels'
-import { magnetPrice } from '../../lib/levels/magnet'
+import { barWindow, magnetPrice, magnetRadiusFor } from '../../lib/levels/magnet'
+import { mergeCandles } from '../../lib/candles/merge'
+import { candleAtLogical, toOhlc } from '../../lib/candles/series'
 import {
   coerceLevel,
   createLevel,
@@ -151,26 +153,72 @@ describe('level persistence merge', () => {
 const priceToY = (p: number) => (200 - p) * 2
 const yToPrice = (y: number) => 200 - y / 2
 const bar = (o: number, h: number, l: number, c: number): Candle => ({ time: 0, open: o, high: h, low: l, close: c, volume: 1 })
+const c5 = (time: number): Candle => ({ time, open: 1, high: 1, low: 1, close: 1, volume: 1 })
 
-describe('magnet (±3 bars, 12 px, tickSize)', () => {
+describe('magnet (A17: px window, wicks first, 24/12 px radius)', () => {
   const candles = [bar(100, 105, 99, 104), bar(104, 110, 103, 108), bar(108, 109, 101, 102), bar(102, 103, 95, 96)]
-  it('snaps to the nearest OHLC within 12 px', () => {
-    // y for 110 = 180, for 108 = 184; finger at 181 → nearest is high 110 (1 px)
-    expect(magnetPrice({ candles, barIndex: 1, y: 181, priceToY, yToPrice, tickSize: 0.1 })).toEqual({ price: 110, snapped: true })
-    // finger at 186 → close 108 (2 px) beats high 110 (6 px)
-    expect(magnetPrice({ candles, barIndex: 1, y: 186, priceToY, yToPrice, tickSize: 0.1 })).toEqual({ price: 108, snapped: true })
+  const base = { priceToY, yToPrice, tickSize: 0.1, barSpacing: 20 }
+  it('prefers wicks over nearer open/close, ties → the more extreme wick', () => {
+    // finger y 186 (price 107): close/open 108 are 2 px away, but wicks win; highs 109 and 105 are both
+    // 4 px away → the higher high (109, bar 2) wins.
+    expect(magnetPrice({ ...base, candles, logical: 1, y: 186 })).toEqual({ price: 109, snapped: true, kind: 'high', barIndex: 2 })
+  })
+  it('falls back to open/close only when no wick is within the radius', () => {
+    const tall = [bar(100, 150, 50, 101)]
+    expect(magnetPrice({ ...base, candles: tall, logical: 0, y: 199 })).toMatchObject({ price: 100, snapped: true, kind: 'open' })
+  })
+  it('uses a 24 px touch radius and 12 px for mouse', () => {
+    expect(magnetRadiusFor('touch')).toBe(24)
+    expect(magnetRadiusFor('pen')).toBe(24)
+    expect(magnetRadiusFor('mouse')).toBe(12)
+    expect(magnetRadiusFor('touch', 30)).toBe(30)
+    // high 110 is 20 px from y 200 → snaps with the touch radius, not with the mouse radius
+    const one = [bar(90, 110, 89, 91)] // high y 180, low y 222; body far
+    expect(magnetPrice({ ...base, candles: one, logical: 0, y: 200, radiusPx: 24 })).toMatchObject({ price: 110, kind: 'high' })
+    expect(magnetPrice({ ...base, candles: one, logical: 0, y: 200, radiusPx: 12 })!.snapped).toBe(false)
+  })
+  it('searches ±32 px horizontally: many narrow bars on zoomed-out Д/Н, at least ±3 bars', () => {
+    const many = Array.from({ length: 40 }, () => bar(10, 10, 10, 10))
+    many[10] = bar(10, 50, 10, 10) // spike 10 bars left of the finger
+    // barSpacing 2 px → ±16 bars → the spike is found
+    expect(magnetPrice({ ...base, candles: many, barSpacing: 2, logical: 20, y: 301, tickSize: 1 })).toMatchObject({ price: 50, barIndex: 10 })
+    // barSpacing 20 px → ±3 bars (min) → not found
+    expect(magnetPrice({ ...base, candles: many, barSpacing: 20, logical: 20, y: 301, tickSize: 1 })!.snapped).toBe(false)
   })
   it('uses the raw price (rounded to tick) when nothing is within the radius', () => {
-    expect(magnetPrice({ candles, barIndex: 1, y: 150.3, priceToY, yToPrice, tickSize: 0.5 })).toEqual({ price: 125, snapped: false })
+    expect(magnetPrice({ ...base, candles, logical: 1, y: 150.3, tickSize: 0.5 })).toEqual({ price: 125, snapped: false })
   })
-  it('only considers bars within ±3 of the finger', () => {
-    const many = [bar(50, 50, 50, 50), ...Array.from({ length: 10 }, () => bar(10, 10, 10, 10))]
-    expect(magnetPrice({ candles: many, barIndex: 8, y: 301, priceToY, yToPrice, tickSize: 1 })!.snapped).toBe(false)
-    expect(magnetPrice({ candles: many, barIndex: 3, y: 301, priceToY, yToPrice, tickSize: 1 })).toEqual({ price: 50, snapped: true })
+  it('handles out-of-range / unmapped fingers', () => {
+    expect(magnetPrice({ ...base, candles, logical: 99, y: 150, tickSize: 1 })).toEqual({ price: 125, snapped: false })
+    expect(magnetPrice({ ...base, candles, logical: Number.NaN, y: 150, tickSize: 1 })).toEqual({ price: 125, snapped: false })
+    expect(magnetPrice({ ...base, candles: [], logical: 0, y: 10, yToPrice: () => null })).toBeNull()
   })
-  it('handles out-of-range bar indices and an unmapped scale', () => {
-    expect(magnetPrice({ candles, barIndex: 99, y: 150, priceToY, yToPrice, tickSize: 1 })).toEqual({ price: 125, snapped: false })
-    expect(magnetPrice({ candles: [], barIndex: 0, y: 10, priceToY, yToPrice: () => null, tickSize: 1 })).toBeNull()
+})
+
+describe('barWindow (px → bars)', () => {
+  it('covers ±windowPx, never fewer than ±3 bars, clamped to the data', () => {
+    expect(barWindow(50, 100, 100)).toEqual({ from: 47, to: 53 }) // wide bars → min ±3
+    expect(barWindow(50, 2, 100)).toEqual({ from: 34, to: 66 }) // 32 px / 2 px = ±16
+    expect(barWindow(50.4, 1.5, 100)).toEqual({ from: 28, to: 72 }) // ceil(32/1.5) = 22
+    expect(barWindow(0, 2, 10)).toEqual({ from: 0, to: 9 })
+    expect(barWindow(-50, 2, 10)).toBeNull() // far left of the data
+    expect(barWindow(Number.NaN, 2, 10)).toBeNull()
+    expect(barWindow(1, 2, 0)).toBeNull()
+  })
+})
+
+describe('store ↔ series index alignment (magnet reads store candles by logical index)', () => {
+  it('maps one series point per candle in store order, also after a history prepend', () => {
+    const tail = [c5(300), c5(600), c5(900)]
+    const older = [c5(0)]
+    const merged = mergeCandles(older, tail)
+    const series = merged.map(toOhlc)
+    expect(series.map((p) => p.time)).toEqual(merged.map((c) => c.time))
+    // the bar that was logical 0 before the prepend is logical 1 after it — same candle object
+    expect(candleAtLogical(merged, 1)).toBe(tail[0])
+    expect(candleAtLogical(merged, 2.4)).toBe(tail[1])
+    expect(candleAtLogical(merged, -1)).toBeNull()
+    expect(candleAtLogical(merged, 4)).toBeNull()
   })
 })
 

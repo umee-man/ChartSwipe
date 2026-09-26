@@ -20,6 +20,7 @@ import {
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
+  type Logical,
   type LogicalRange,
   type Time,
   type UTCTimestamp,
@@ -30,7 +31,8 @@ import { tickDecimals } from '~/lib/binance/parse'
 import { lastCandle } from '~/lib/candles/merge'
 import { opensZoomedOut, tfLabel } from '~/lib/feed/tf'
 import { hitTestLabels, LABEL_H, layoutLabels, type LabelRect } from '~/lib/levels/labels'
-import { magnetPrice } from '~/lib/levels/magnet'
+import { magnetPrice, magnetRadiusFor, type MagnetResult } from '~/lib/levels/magnet'
+import { toOhlc, toVolume } from '~/lib/candles/series'
 import { LEVEL_COLOR, levelsPriceRange, roundToTick, type Level } from '~/lib/levels/model'
 import type { SeriesEvent, SeriesStatus } from '~/lib/candles/store'
 import { useCandles } from '~/composables/useCandles'
@@ -51,8 +53,6 @@ const props = defineProps<{
 
 const UP = '#26a69a'
 const DOWN = '#ef5350'
-const UP_VOL = 'rgba(38,166,154,0.45)'
-const DOWN_VOL = 'rgba(239,83,80,0.45)'
 /** Start loading older history when fewer than this many bars remain to the left of the viewport. */
 const HISTORY_THRESHOLD_BARS = 30
 /** Range-change events fire every frame while panning; check for history at most this often. */
@@ -78,19 +78,11 @@ const priceLines = new Map<string, IPriceLine>()
 /** Plaque rectangles (pane px) for the active slide, recomputed every frame (price scale can move any time). */
 const labelRects = ref<LabelRect[]>([])
 let rafId: number | null = null
+const MAGNET_RADIUS_DEFAULT = 24
 
-const toBar = (c: Candle): CandlestickData<Time> => ({
-  time: c.time as UTCTimestamp,
-  open: c.open,
-  high: c.high,
-  low: c.low,
-  close: c.close,
-})
-const toVol = (c: Candle): HistogramData<Time> => ({
-  time: c.time as UTCTimestamp,
-  value: c.volume,
-  color: c.close >= c.open ? UP_VOL : DOWN_VOL,
-})
+// One series point per stored candle, same order → logical index == store index (magnet, A17).
+const toBar = (c: Candle): CandlestickData<Time> => ({ ...toOhlc(c), time: c.time as UTCTimestamp })
+const toVol = (c: Candle): HistogramData<Time> => ({ ...toVolume(c), time: c.time as UTCTimestamp })
 
 const pad = (n: number) => String(n).padStart(2, '0')
 /** lightweight-charts works in UTC; render labels in the device's local time. */
@@ -320,36 +312,79 @@ function hitLevel(clientX: number, clientY: number): string | null {
   return hitTestLabels(labelRects.value, p.x, p.y)?.levelId ?? null
 }
 
-/** Magnet price for a long press at a client point (arch §5.4), or null outside the price pane. */
-function magnetAt(clientX: number, clientY: number): number | null {
-  const series = candleSeries
+/** Snap feedback (A17): a ring on the wick the level locked to, shown ~600 ms. */
+const SNAP_MARKER_MS = 600
+const snapMarker = ref<{ x: number; y: number; key: string } | null>(null)
+let snapTimer: ReturnType<typeof setTimeout> | null = null
+function showSnapMarker(res: MagnetResult) {
   const c = chart.value
-  const p = toLocal(clientX, clientY)
-  if (!series || !c || !p || p.y < 0 || p.y > paneHeight()) return null
-  const plotWidth = (host.value?.clientWidth ?? 0) - priceAxisWidth()
-  if (p.x < 0 || p.x > plotWidth) return null
-  const barIndex = c.timeScale().coordinateToLogical(p.x)
-  const res = magnetPrice({
-    candles: store.get(props.symbol, props.tf)?.candles ?? [],
-    barIndex: barIndex ?? -1e9,
-    y: p.y,
-    priceToY: (price) => series.priceToCoordinate(price),
-    yToPrice: (y) => series.coordinateToPrice(y),
-    tickSize: props.tickSize,
-  })
-  return res?.price ?? null
+  const series = candleSeries
+  if (!c || !series || !res.snapped || res.barIndex === undefined) return
+  const x = c.timeScale().logicalToCoordinate(res.barIndex as Logical)
+  const y = series.priceToCoordinate(res.price)
+  if (x === null || y === null) return
+  // A new key per snap target re-mounts the ring so its pop animation replays.
+  snapMarker.value = { x, y, key: `${res.barIndex}:${res.price}` }
+  if (snapTimer) clearTimeout(snapTimer)
+  snapTimer = setTimeout(() => (snapMarker.value = null), SNAP_MARKER_MS)
 }
 
-/** New price when the plaque of a level at `startPrice` is dragged by `dy` px (tick-rounded), or null. */
-function priceForDrag(startPrice: number, dy: number): number | null {
+/** Run the magnet (arch §5.4, A17) at pane point (x, y). */
+function magnetAtLocal(x: number, y: number, pointerType: string, touchRadius: number): MagnetResult | null {
+  const series = candleSeries
+  const c = chart.value
+  if (!series || !c) return null
+  const ts = c.timeScale()
+  const logical = ts.coordinateToLogical(x)
+  const res = magnetPrice({
+    candles: store.get(props.symbol, props.tf)?.candles ?? [],
+    logical: logical ?? Number.NaN,
+    barSpacing: ts.options().barSpacing,
+    y,
+    priceToY: (price) => series.priceToCoordinate(price),
+    yToPrice: (py) => series.coordinateToPrice(py),
+    tickSize: props.tickSize,
+    radiusPx: magnetRadiusFor(pointerType, touchRadius),
+  })
+  if (res?.snapped) showSnapMarker(res)
+  return res
+}
+
+/** Magnet result for a long press at a client point, or null outside the price pane. */
+function magnetAt(clientX: number, clientY: number, pointerType = 'touch', touchRadius?: number): MagnetResult | null {
+  const p = toLocal(clientX, clientY)
+  if (!p || p.y < 0 || p.y > paneHeight()) return null
+  const plotWidth = (host.value?.clientWidth ?? 0) - priceAxisWidth()
+  if (p.x < 0 || p.x > plotWidth) return null
+  return magnetAtLocal(p.x, p.y, pointerType, touchRadius ?? MAGNET_RADIUS_DEFAULT)
+}
+
+/**
+ * New price while a plaque is dragged: the line follows `dy` from its start price, and the magnet snaps
+ * it to a wick within the radius of the bars around the finger's x (A17). Null if unmappable.
+ */
+function priceForDrag(
+  startPrice: number,
+  dy: number,
+  clientX?: number,
+  pointerType = 'touch',
+  touchRadius?: number,
+): MagnetResult | null {
   const series = candleSeries
   if (!series) return null
   const y0 = series.priceToCoordinate(startPrice)
   if (y0 === null) return null
   const y = Math.min(Math.max(0, y0 + dy), paneHeight())
+  if (clientX !== undefined) {
+    const p = toLocal(clientX, 0)
+    if (p) {
+      const res = magnetAtLocal(p.x, y, pointerType, touchRadius ?? MAGNET_RADIUS_DEFAULT)
+      if (res) return res
+    }
+  }
   const price = series.coordinateToPrice(y)
   if (price === null || !(price > 0)) return null
-  return roundToTick(price, props.tickSize)
+  return { price: roundToTick(price, props.tickSize), snapped: false }
 }
 
 const priceDecimals = computed(() => tickDecimals(props.tickSize > 0 ? props.tickSize : 0.01))
@@ -454,6 +489,7 @@ watch(
 watch(() => props.tickSize, applyPriceFormat)
 
 onBeforeUnmount(() => {
+  if (snapTimer) clearTimeout(snapTimer)
   stopLayoutLoop()
   priceLines.clear()
   offStore?.()
@@ -471,6 +507,13 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, pr
 <template>
   <div class="chart-view">
     <div ref="host" class="chart-host" />
+    <div
+      v-if="snapMarker"
+      :key="snapMarker.key"
+      class="snap-marker"
+      aria-hidden="true"
+      :style="{ left: `${snapMarker.x}px`, top: `${snapMarker.y}px` }"
+    />
     <div v-if="active && labelRects.length" class="plaques" aria-hidden="true">
       <div
         v-for="r in labelRects"
@@ -502,6 +545,31 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, pr
 .chart-host {
   position: absolute;
   inset: 0;
+}
+.snap-marker {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid #ffb300;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(255, 179, 0, 0.25);
+  pointer-events: none;
+  animation: snap-pop 600ms ease-out forwards;
+}
+@keyframes snap-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
 }
 .plaques {
   position: absolute;

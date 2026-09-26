@@ -37,10 +37,10 @@ export interface GestureHandlers {
    * 'level' → the pointer is on a level plaque (item 1); 'priceAxis' → chart immediately (item 5).
    */
   hitTest?(e: PointerEvent): GestureTarget
-  /** Item 2: long press on the chart (client coordinates of the finger). */
-  onLongPress?(p: { x: number; y: number }): void
-  /** Item 1: plaque drag in progress (offsets from the pointer-down point). */
-  onLevelMove?(dx: number, dy: number): void
+  /** Item 2: long press on the chart (client coordinates of the finger; pointerType picks the magnet radius). */
+  onLongPress?(p: { x: number; y: number; pointerType: string }): void
+  /** Item 1: plaque drag in progress (offsets from the pointer-down point + current finger position). */
+  onLevelMove?(dx: number, dy: number, p: { x: number; y: number; pointerType: string }): void
   /** Item 1: plaque released. `tap` = short press without movement (opens the level sheet). */
   onLevelEnd?(dx: number, dy: number, info: { tap: boolean; cancelled: boolean }): void
 }
@@ -56,6 +56,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
   let last = { x: 0, y: 0 }
   let startTarget: EventTarget | null = null
   let startIsTouch = false
+  let startPointerType = 'touch'
   let lastTap: Tap | null = null
   let longPressTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -88,6 +89,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
     last = { x: e.clientX, y: e.clientY }
     startTarget = e.target
     startIsTouch = e.pointerType === 'touch'
+    startPointerType = e.pointerType || 'touch'
     velocity.reset()
     velocity.add(e.timeStamp, e.clientY)
 
@@ -115,7 +117,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
         longPressTimer = null
         if (mode.value !== 'pending' || pointers.size !== 1) return
         mode.value = 'longpress' // item 2
-        h.onLongPress?.({ x: last.x, y: last.y })
+        h.onLongPress?.({ x: last.x, y: last.y, pointerType: startPointerType })
       }, LONG_PRESS_MS)
     }
   }
@@ -143,7 +145,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
       if (dir === 'feed') cancelChartLongTap()
     }
     if (mode.value === 'feed') h.onFeedMove(dy)
-    else if (mode.value === 'level') h.onLevelMove?.(dx, dy)
+    else if (mode.value === 'level') h.onLevelMove?.(dx, dy, { x: e.clientX, y: e.clientY, pointerType: startPointerType })
     blockIfOwned(e)
   }
 

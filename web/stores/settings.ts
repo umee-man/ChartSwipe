@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import type { Interval } from '~/lib/binance/types'
 import { DEFAULT_TF_BUTTONS, isInterval, migrateTfButtons } from '~/lib/feed/tf'
+import { MAGNET_RADIUS_TOUCH_PX } from '~/lib/levels/magnet'
 import { loadJson, saveJson } from '~/lib/storage'
 
 const KEY = 'cs:settings'
@@ -14,13 +15,25 @@ interface SettingsState {
   /** Active TF; persists across tickers and sessions. */
   activeTf: Interval
   showVolume: boolean
+  /** Magnet vertical radius for touch, px (A17; mouse always uses 12 px). */
+  magnetRadius: number
 }
 
-function sanitize(raw: { tfButtons?: unknown; activeTf?: unknown; showVolume?: unknown }): SettingsState {
+/** Clamp a persisted magnet radius to a sane range; default 24 px. */
+export function sanitizeMagnetRadius(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(48, Math.max(8, Math.round(v))) : MAGNET_RADIUS_TOUCH_PX
+}
+
+function sanitize(raw: { tfButtons?: unknown; activeTf?: unknown; showVolume?: unknown; magnetRadius?: unknown }): SettingsState {
   // Old persisted 3-button configs are migrated here (1w appended).
   const buttons = migrateTfButtons(raw.tfButtons)
   const activeTf = isInterval(raw.activeTf) && buttons.includes(raw.activeTf) ? raw.activeTf : buttons[0]!
-  return { tfButtons: buttons, activeTf, showVolume: typeof raw.showVolume === 'boolean' ? raw.showVolume : true }
+  return {
+    tfButtons: buttons,
+    activeTf,
+    showVolume: typeof raw.showVolume === 'boolean' ? raw.showVolume : true,
+    magnetRadius: sanitizeMagnetRadius(raw.magnetRadius),
+  }
 }
 
 export const useSettingsStore = defineStore('settings', {
@@ -32,9 +45,13 @@ export const useSettingsStore = defineStore('settings', {
       this.persist()
     },
     setTfButtons(buttons: Interval[]) {
-      const next = sanitize({ tfButtons: buttons, activeTf: this.activeTf, showVolume: this.showVolume })
+      const next = sanitize({ ...this.$state, tfButtons: buttons })
       this.tfButtons = next.tfButtons
       this.activeTf = next.activeTf
+      this.persist()
+    },
+    setMagnetRadius(px: number) {
+      this.magnetRadius = sanitizeMagnetRadius(px)
       this.persist()
     },
     toggleVolume() {
@@ -42,7 +59,12 @@ export const useSettingsStore = defineStore('settings', {
       this.persist()
     },
     persist() {
-      saveJson(KEY, { tfButtons: this.tfButtons, activeTf: this.activeTf, showVolume: this.showVolume })
+      saveJson(KEY, {
+        tfButtons: this.tfButtons,
+        activeTf: this.activeTf,
+        showVolume: this.showVolume,
+        magnetRadius: this.magnetRadius,
+      })
     },
   },
 })

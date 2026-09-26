@@ -4,6 +4,7 @@
 import { ref } from 'vue'
 import type { Interval } from '~/lib/binance/types'
 import type { Level } from '~/lib/levels/model'
+import type { MagnetResult } from '~/lib/levels/magnet'
 import ChartView from './ChartView.vue'
 
 defineProps<{
@@ -24,8 +25,10 @@ defineExpose({
   priceAxisWidth: () => chart.value?.priceAxisWidth() ?? 0,
   clearCrosshair: () => chart.value?.clearCrosshair(),
   hitLevel: (x: number, y: number) => chart.value?.hitLevel(x, y) ?? null,
-  magnetAt: (x: number, y: number) => chart.value?.magnetAt(x, y) ?? null,
-  priceForDrag: (startPrice: number, dy: number) => chart.value?.priceForDrag(startPrice, dy) ?? null,
+  magnetAt: (x: number, y: number, pointerType: string, touchRadius: number): MagnetResult | null =>
+    chart.value?.magnetAt(x, y, pointerType, touchRadius) ?? null,
+  priceForDrag: (startPrice: number, dy: number, x: number, pointerType: string, touchRadius: number): MagnetResult | null =>
+    chart.value?.priceForDrag(startPrice, dy, x, pointerType, touchRadius) ?? null,
 })
 </script>
 
