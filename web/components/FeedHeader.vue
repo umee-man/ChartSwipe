@@ -3,6 +3,7 @@
 import { computed, ref, toRef } from 'vue'
 import { tickDecimals } from '~/lib/binance/parse'
 import { FEED_SOURCES, type FeedSourceId } from '~/lib/feed/sources'
+import { CHART_TYPE_LABELS } from '~/lib/chart/type'
 import { useLastPrice } from '~/composables/useCandles'
 import { useFeedStore } from '~/stores/feed'
 import { useSettingsStore } from '~/stores/settings'
@@ -90,6 +91,10 @@ async function pick(id: FeedSourceId) {
       </button>
       <button type="button" role="menuitemcheckbox" :aria-checked="settings.showVolume" class="item" @click="settings.toggleVolume()">
         Объём: {{ settings.showVolume ? 'вкл' : 'выкл' }}
+      </button>
+      <button type="button" role="menuitem" class="item" @click="settings.toggleChartType()">
+        Вид: {{ CHART_TYPE_LABELS[settings.chartType] }}
+        <small class="alt">→ {{ CHART_TYPE_LABELS[settings.chartType === 'candles' ? 'bars' : 'candles'] }}</small>
       </button>
     </div>
   </header>
@@ -190,6 +195,11 @@ async function pick(id: FeedSourceId) {
 }
 .item:active {
   background: var(--surface);
+}
+.alt {
+  margin-left: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 hr {
   border: 0;

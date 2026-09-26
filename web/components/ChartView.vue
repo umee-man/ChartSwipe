@@ -6,6 +6,7 @@
 // handled by useGestures via FeedPager), magnet for long-press placement, levels included in the
 // Д/Н autoscale.
 import {
+  BarSeries,
   CandlestickSeries,
   ColorType,
   createChart,
@@ -33,6 +34,7 @@ import { opensZoomedOut, tfLabel } from '~/lib/feed/tf'
 import { hitTestLabels, LABEL_H, layoutLabels, type LabelRect } from '~/lib/levels/labels'
 import { magnetPrice, magnetRadiusFor, type MagnetResult } from '~/lib/levels/magnet'
 import { toOhlc, toVolume } from '~/lib/candles/series'
+import type { ChartType } from '~/lib/chart/type'
 import { LEVEL_COLOR, levelsPriceRange, roundToTick, type Level } from '~/lib/levels/model'
 import type { SeriesEvent, SeriesStatus } from '~/lib/candles/store'
 import { useCandles } from '~/composables/useCandles'
@@ -49,6 +51,8 @@ const props = defineProps<{
   /** Level being dragged (highlighted) and its swipe-to-delete offset. */
   dragId?: string | null
   dragDx?: number
+  /** Candles or OHLC bars (A18). */
+  chartType?: ChartType
 }>()
 
 const UP = '#26a69a'
@@ -63,7 +67,8 @@ const host = ref<HTMLDivElement | null>(null)
 const status = ref<SeriesStatus>('idle')
 const errorText = ref<string | null>(null)
 const chart = shallowRef<IChartApi | null>(null)
-let candleSeries: ISeriesApi<'Candlestick'> | null = null
+/** Price series: CandlestickSeries or BarSeries (A18); both take the same OHLC data. */
+let priceSeries: ISeriesApi<'Candlestick' | 'Bar'> | null = null
 let volumeSeries: ISeriesApi<'Histogram'> | null = null
 let offStore: (() => void) | null = null
 let lastHistoryCheck = 0
@@ -106,7 +111,7 @@ function formatTime(time: Time): string {
 
 function applyPriceFormat() {
   const tick = props.tickSize > 0 ? props.tickSize : 0.01
-  candleSeries?.applyOptions({ priceFormat: { type: 'price', precision: tickDecimals(tick), minMove: tick } })
+  priceSeries?.applyOptions({ priceFormat: { type: 'price', precision: tickDecimals(tick), minMove: tick } })
 }
 
 /** Full redraw from memory. Cheap enough (< 100 ms for ~1–2k bars) for TF switches. */
@@ -120,7 +125,7 @@ function renderAll() {
   const s = store.get(props.symbol, props.tf)
   syncStatus()
   const candles = s?.candles ?? []
-  candleSeries?.setData(candles.map(toBar))
+  priceSeries?.setData(candles.map(toBar))
   volumeSeries?.setData(candles.map(toVol))
   if (fitPending && candles.length) {
     fitAll()
@@ -138,8 +143,8 @@ function fitAll() {
 
 function renderLive() {
   const last = lastCandle(store.get(props.symbol, props.tf)?.candles)
-  if (!last || !candleSeries || !volumeSeries) return
-  candleSeries.update(toBar(last))
+  if (!last || !priceSeries || !volumeSeries) return
+  priceSeries.update(toBar(last))
   volumeSeries.update(toVol(last))
 }
 
@@ -215,12 +220,41 @@ function priceAxisWidth(): number {
   return chart.value?.priceScale('right').width() ?? 0
 }
 
+// ---------------- chart type (A18) ----------------
+
+function addPriceSeries(c: IChartApi, type: ChartType): ISeriesApi<'Candlestick' | 'Bar'> {
+  const common = { upColor: UP, downColor: DOWN, autoscaleInfoProvider: autoscaleWithLevels }
+  const series =
+    type === 'bars'
+      ? c.addSeries(BarSeries, { ...common, thinBars: false, openVisible: true })
+      : c.addSeries(CandlestickSeries, { ...common, wickUpColor: UP, wickDownColor: DOWN, borderVisible: false })
+  return series as ISeriesApi<'Candlestick' | 'Bar'>
+}
+
+/**
+ * Swap candles <-> bars in place: no data reload (setData from memory), same visible range, price
+ * format, levels (price lines are per series, so they are re-created), autoscale provider.
+ */
+function switchChartType(type: ChartType) {
+  const c = chart.value
+  if (!c || !priceSeries) return
+  const range = c.timeScale().getVisibleLogicalRange()
+  c.removeSeries(priceSeries)
+  priceLines.clear()
+  priceSeries = addPriceSeries(c, type)
+  applyPriceFormat()
+  const candles = store.get(props.symbol, props.tf)?.candles ?? []
+  priceSeries.setData(candles.map(toBar))
+  syncPriceLines()
+  if (range) c.timeScale().setVisibleLogicalRange(range)
+}
+
 // ---------------- levels ----------------
 
 const levelById = computed(() => new Map(props.levels.map((l) => [l.id, l])))
 
 function syncPriceLines() {
-  const series = candleSeries
+  const series = priceSeries
   if (!series) return
   const seen = new Set<string>()
   for (const l of props.levels) {
@@ -252,7 +286,7 @@ function paneHeight(): number {
 
 /** Recompute plaque positions; only commit to Vue state when something actually moved. */
 function layoutPlaques() {
-  const series = candleSeries
+  const series = priceSeries
   if (!series || !props.active || props.levels.length === 0) {
     if (labelRects.value.length) labelRects.value = []
     return
@@ -318,7 +352,7 @@ const snapMarker = ref<{ x: number; y: number; key: string } | null>(null)
 let snapTimer: ReturnType<typeof setTimeout> | null = null
 function showSnapMarker(res: MagnetResult) {
   const c = chart.value
-  const series = candleSeries
+  const series = priceSeries
   if (!c || !series || !res.snapped || res.barIndex === undefined) return
   const x = c.timeScale().logicalToCoordinate(res.barIndex as Logical)
   const y = series.priceToCoordinate(res.price)
@@ -331,7 +365,7 @@ function showSnapMarker(res: MagnetResult) {
 
 /** Run the magnet (arch §5.4, A17) at pane point (x, y). */
 function magnetAtLocal(x: number, y: number, pointerType: string, touchRadius: number): MagnetResult | null {
-  const series = candleSeries
+  const series = priceSeries
   const c = chart.value
   if (!series || !c) return null
   const ts = c.timeScale()
@@ -370,7 +404,7 @@ function priceForDrag(
   pointerType = 'touch',
   touchRadius?: number,
 ): MagnetResult | null {
-  const series = candleSeries
+  const series = priceSeries
   if (!series) return null
   const y0 = series.priceToCoordinate(startPrice)
   if (y0 === null) return null
@@ -438,14 +472,7 @@ onMounted(() => {
     handleScroll: { horzTouchDrag: true, vertTouchDrag: true, pressedMouseMove: true, mouseWheel: true },
     handleScale: { pinch: true, mouseWheel: true, axisPressedMouseMove: { time: true, price: true } },
   })
-  candleSeries = c.addSeries(CandlestickSeries, {
-    upColor: UP,
-    downColor: DOWN,
-    wickUpColor: UP,
-    wickDownColor: DOWN,
-    borderVisible: false,
-    autoscaleInfoProvider: autoscaleWithLevels,
-  })
+  priceSeries = addPriceSeries(c, props.chartType ?? 'candles')
   volumeSeries = c.addSeries(HistogramSeries, {
     priceScaleId: 'vol',
     priceFormat: { type: 'volume' },
@@ -487,6 +514,10 @@ watch(
   (v) => volumeSeries?.applyOptions({ visible: v }),
 )
 watch(() => props.tickSize, applyPriceFormat)
+watch(
+  () => props.chartType,
+  (t) => switchChartType(t ?? 'candles'),
+)
 
 onBeforeUnmount(() => {
   if (snapTimer) clearTimeout(snapTimer)
@@ -497,7 +528,7 @@ onBeforeUnmount(() => {
   chart.value?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
   chart.value?.remove() // free canvas + listeners (memory budget, arch §5.2)
   chart.value = null
-  candleSeries = null
+  priceSeries = null
   volumeSeries = null
 })
 

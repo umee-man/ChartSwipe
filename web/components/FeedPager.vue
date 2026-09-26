@@ -230,6 +230,7 @@ defineExpose({ go, resetCurrent: () => nextTick(() => currentSlide()?.resetView(
           :active="slot.offset === 0"
           :drag-id="slot.offset === 0 ? (levels.drag?.id ?? null) : null"
           :drag-dx="slot.offset === 0 ? (levels.drag?.dx ?? 0) : 0"
+          :chart-type="settings.chartType"
         />
       </div>
     </div>

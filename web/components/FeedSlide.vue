@@ -5,6 +5,7 @@ import { ref } from 'vue'
 import type { Interval } from '~/lib/binance/types'
 import type { Level } from '~/lib/levels/model'
 import type { MagnetResult } from '~/lib/levels/magnet'
+import type { ChartType } from '~/lib/chart/type'
 import ChartView from './ChartView.vue'
 
 defineProps<{
@@ -16,6 +17,7 @@ defineProps<{
   active: boolean
   dragId?: string | null
   dragDx?: number
+  chartType?: ChartType
 }>()
 
 const chart = ref<InstanceType<typeof ChartView> | null>(null)
@@ -44,6 +46,7 @@ defineExpose({
       :active="active"
       :drag-id="dragId"
       :drag-dx="dragDx"
+      :chart-type="chartType"
     />
   </div>
 </template>
