@@ -1,0 +1,175 @@
+//@version=6
+// ChartSwipe Levels — draws price levels exported from the ChartSwipe app.
+// Source of truth: architecture.md §9 (Pine indicator) and §7 (GET /v1/export/pine).
+//
+// Input string format (exactly what GET /v1/export/pine returns):
+//   BTCUSDT:64200s,65800r,63000-63400z;ETHUSDT:3120s
+//   s = support (green), r = resistance (red), z = zone "low-high" (blue box)
+// Tolerated extras: optional exchange prefix ("BINANCE:BTCUSDT:..."), a ".P" suffix
+// on the symbol, any letter case, spaces, newlines instead of ";", surrounding quotes.
+// Malformed entries/tokens are skipped and counted in the status panel.
+indicator("ChartSwipe Levels", shorttitle = "ChartSwipe", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ---------- Inputs ----------
+const string G_DATA = "Данные"
+const string G_VIEW = "Вид"
+
+string levelsInput = input.text_area("", "Строка уровней из ChartSwipe", tooltip = "Вставьте строку из приложения (Интеграции → TradingView), например: BTCUSDT:64200s,65800r,63000-63400z;ETHUSDT:3120s", group = G_DATA)
+
+color supportColor    = input.color(#2E7D32, "Поддержка (s)", group = G_VIEW)
+color resistanceColor = input.color(#C62828, "Сопротивление (r)", group = G_VIEW)
+color zoneColor       = input.color(#1565C0, "Зона (z)", group = G_VIEW)
+int   zoneTransp      = input.int(80, "Прозрачность заливки зоны, %", minval = 0, maxval = 100, group = G_VIEW)
+int   zoneBars        = input.int(500, "Начало зоны: баров назад", minval = 1, maxval = 5000, group = G_VIEW)
+int   lineWidth       = input.int(2, "Толщина линий", minval = 1, maxval = 4, group = G_VIEW)
+bool  showLabels      = input.bool(true, "Подписи с ценой", group = G_VIEW)
+bool  showStatus      = input.bool(true, "Панель статуса", group = G_VIEW)
+
+// Pine hard limits for drawings (see indicator() declaration above).
+const int MAX_OBJECTS = 500
+
+// ---------- Parsing helpers ----------
+
+// Normalizes a symbol for comparison: trims, upper-cases, drops an exchange
+// prefix left before the last ':' (defensive) and a trailing ".P" (Binance perps on TV).
+normalizeSymbol(string raw) =>
+    string s = str.upper(str.trim(raw))
+    int colonPos = str.pos(s, ":")
+    if not na(colonPos)
+        array<string> segs = str.split(s, ":")
+        s := str.trim(array.get(segs, array.size(segs) - 1))
+    if str.endswith(s, ".P")
+        s := str.substring(s, 0, str.length(s) - 2)
+    s
+
+// Parses one level token ("64200s", "65800r", "63000-63400z").
+// Returns [kind, price, priceTo]; kind == "" means the token is malformed.
+parseLevel(string raw) =>
+    string tok = str.lower(str.trim(raw))
+    string kind = ""
+    float p1 = na
+    float p2 = na
+    int n = str.length(tok)
+    if n >= 2
+        string k = str.substring(tok, n - 1, n)
+        string body = str.trim(str.substring(tok, 0, n - 1))
+        if k == "s" or k == "r"
+            float v = str.tonumber(body)
+            if not na(v) and v > 0
+                kind := k
+                p1 := v
+        else if k == "z"
+            // Split "low-high" on the first '-' at index > 0 that is not an exponent
+            // sign (i.e. not right after 'e'), so "3e-05-4e-05" still splits correctly.
+            // The contract (README) requires plain decimals; this is defensive only.
+            int bn = str.length(body)
+            int splitAt = -1
+            if bn >= 3
+                for i = 1 to bn - 2
+                    if str.substring(body, i, i + 1) == "-" and str.substring(body, i - 1, i) != "e"
+                        splitAt := i
+                        break
+            if splitAt > 0
+                float a = str.tonumber(str.trim(str.substring(body, 0, splitAt)))
+                float b = str.tonumber(str.trim(str.substring(body, splitAt + 1, bn)))
+                if not na(a) and not na(b) and a > 0 and b > 0
+                    kind := k
+                    p1 := math.min(a, b)
+                    p2 := math.max(a, b)
+    [kind, p1, p2]
+
+fmtPrice(float p) =>
+    str.tostring(p, format.mintick)
+
+// ---------- Drawing state ----------
+// Drawings are kept in var arrays so each redraw can delete the previous set
+// (no duplicates when the last bar recalculates on every realtime tick).
+var array<line>  csLines  = array.new<line>()
+var array<box>   csBoxes  = array.new<box>()
+var array<label> csLabels = array.new<label>()
+var table statusTable = table.new(position.top_right, 1, 1, bgcolor = color.new(color.black, 30), border_width = 0)
+
+if barstate.islast
+    // Delete & redraw.
+    for l in csLines
+        line.delete(l)
+    array.clear(csLines)
+    for b in csBoxes
+        box.delete(b)
+    array.clear(csBoxes)
+    for lb in csLabels
+        label.delete(lb)
+    array.clear(csLabels)
+
+    string chartSym = normalizeSymbol(syminfo.ticker)
+    // Newlines act as entry separators; stray quotes from copy/paste are dropped.
+    string src = str.replace_all(str.replace_all(levelsInput, "\n", ";"), "\"", "")
+
+    int drawn = 0
+    int bad = 0
+    bool limitHit = false
+    // Labels share one 500 budget across lines and zones, so they can run out first.
+    bool labelLimitHit = false
+
+    for entry in str.split(src, ";")
+        string e = str.trim(entry)
+        if str.length(e) == 0
+            continue
+        array<string> parts = str.split(e, ":")
+        int np = array.size(parts)
+        if np < 2
+            bad += 1
+            continue
+        // Last part = level list, the one before it = symbol; anything earlier is an exchange prefix.
+        string sym = normalizeSymbol(array.get(parts, np - 2))
+        if sym != chartSym
+            continue
+        for tok in str.split(array.get(parts, np - 1), ",")
+            if str.length(str.trim(tok)) == 0
+                continue
+            [kind, p1, p2] = parseLevel(tok)
+            if kind == ""
+                bad += 1
+                continue
+            if kind == "z"
+                if array.size(csBoxes) >= MAX_OBJECTS
+                    limitHit := true
+                    continue
+                box bx = box.new(left = math.max(0, bar_index - zoneBars), top = p2, right = bar_index, bottom = p1, border_color = zoneColor, border_width = 1, extend = extend.right, xloc = xloc.bar_index, bgcolor = color.new(zoneColor, zoneTransp))
+                array.push(csBoxes, bx)
+                drawn += 1
+                if showLabels
+                    if array.size(csLabels) < MAX_OBJECTS
+                        array.push(csLabels, label.new(bar_index + 3, p2, "Зона " + fmtPrice(p1) + " – " + fmtPrice(p2), xloc = xloc.bar_index, style = label.style_label_lower_left, color = color.new(zoneColor, 20), textcolor = color.white, size = size.small))
+                    else
+                        labelLimitHit := true
+            else
+                if array.size(csLines) >= MAX_OBJECTS
+                    limitHit := true
+                    continue
+                color c = kind == "s" ? supportColor : resistanceColor
+                line ln = line.new(bar_index, p1, bar_index + 1, p1, xloc = xloc.bar_index, extend = extend.both, color = c, style = line.style_solid, width = lineWidth)
+                array.push(csLines, ln)
+                drawn += 1
+                if showLabels
+                    if array.size(csLabels) < MAX_OBJECTS
+                        string name = kind == "s" ? "Поддержка " : "Сопротивление "
+                        array.push(csLabels, label.new(bar_index + 3, p1, name + fmtPrice(p1), xloc = xloc.bar_index, style = label.style_label_left, color = c, textcolor = color.white, size = size.small))
+                    else
+                        labelLimitHit := true
+
+    if showStatus
+        string msg = ""
+        if str.length(str.trim(levelsInput)) == 0
+            msg := "ChartSwipe: вставьте строку уровней в настройках индикатора"
+        else
+            msg := "ChartSwipe · " + chartSym + ": уровней " + str.tostring(drawn)
+            if bad > 0
+                msg += " · пропущено ошибочных: " + str.tostring(bad)
+            if limitHit
+                msg += " · достигнут лимит 500 объектов"
+            if labelLimitHit
+                msg += " · подписи: лимит 500"
+        table.cell(statusTable, 0, 0, msg, text_color = color.white, text_size = size.small)
+    else
+        table.clear(statusTable, 0, 0)

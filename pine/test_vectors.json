@@ -1,0 +1,94 @@
+{
+  "description": "Shared vectors for the Pine string contract (architecture.md §7 GET /v1/export/pine, §9). Each case: input string, chart ticker (syminfo.ticker), expected levels drawn for that chart as [kind, price, price_to|null] in input order, and the malformed-token count. Generators in api/ and web/lib/pine/ must round-trip against the contract_ok cases; contract_ok=false cases exercise the indicator's tolerance only and must never be emitted by a generator.",
+  "cases": [
+    {
+      "name": "architecture example, BTC chart",
+      "input": "BTCUSDT:64200s,65800r,63000-63400z;ETHUSDT:3120s",
+      "ticker": "BTCUSDT.P",
+      "contract_ok": true,
+      "levels": [["s", 64200, null], ["r", 65800, null], ["z", 63000, 63400]],
+      "bad": 0
+    },
+    {
+      "name": "architecture example, ETH chart",
+      "input": "BTCUSDT:64200s,65800r,63000-63400z;ETHUSDT:3120s",
+      "ticker": "ETHUSDT.P",
+      "contract_ok": true,
+      "levels": [["s", 3120, null]],
+      "bad": 0
+    },
+    {
+      "name": "symbol absent on chart",
+      "input": "BTCUSDT:64200s;ETHUSDT:3120s",
+      "ticker": "SOLUSDT.P",
+      "contract_ok": true,
+      "levels": [],
+      "bad": 0
+    },
+    {
+      "name": "small decimal prices",
+      "input": "PEPEUSDT:0.00001234s,0.0000125-0.0000131z",
+      "ticker": "PEPEUSDT.P",
+      "contract_ok": true,
+      "levels": [["s", 0.00001234, null], ["z", 0.0000125, 0.0000131]],
+      "bad": 0
+    },
+    {
+      "name": "exchange prefix and uppercase kind letters",
+      "input": "BINANCE:BTCUSDT.P:64200S,65800R,63000-63400Z",
+      "ticker": "BTCUSDT.P",
+      "contract_ok": false,
+      "levels": [["s", 64200, null], ["r", 65800, null], ["z", 63000, 63400]],
+      "bad": 0
+    },
+    {
+      "name": "zone ends swapped",
+      "input": "BTCUSDT:63400-63000z",
+      "ticker": "BTCUSDT.P",
+      "contract_ok": false,
+      "levels": [["z", 63000, 63400]],
+      "bad": 0
+    },
+    {
+      "name": "quotes, newlines, spaces",
+      "input": "\"BTCUSDT: 64200s , 63000 - 63400z\nETHUSDT:3120s\"",
+      "ticker": "BTCUSDT",
+      "contract_ok": false,
+      "levels": [["s", 64200, null], ["z", 63000, 63400]],
+      "bad": 0
+    },
+    {
+      "name": "malformed tokens counted, valid ones kept",
+      "input": "BTCUSDT:64200s,abc,64200x,0s,63000-63400-63500z,-5s,,65800r",
+      "ticker": "BTCUSDT.P",
+      "contract_ok": false,
+      "levels": [["s", 64200, null], ["r", 65800, null]],
+      "bad": 5
+    },
+    {
+      "name": "entry without colon",
+      "input": "BTCUSDT64200s;BTCUSDT:65800r",
+      "ticker": "BTCUSDT.P",
+      "contract_ok": false,
+      "levels": [["r", 65800, null]],
+      "bad": 1
+    },
+    {
+      "name": "exponent notation zone (forbidden by contract; indicator splits defensively)",
+      "input": "PEPEUSDT:3e-05-4e-05z",
+      "ticker": "PEPEUSDT.P",
+      "contract_ok": false,
+      "requires_exponent_tonumber": true,
+      "levels": [["z", 0.00003, 0.00004]],
+      "bad": 0
+    },
+    {
+      "name": "empty input",
+      "input": "",
+      "ticker": "BTCUSDT.P",
+      "contract_ok": true,
+      "levels": [],
+      "bad": 0
+    }
+  ]
+}
