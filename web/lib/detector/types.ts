@@ -15,12 +15,12 @@ export interface Candle {
 }
 
 /** Timeframes that have built-in defaults (architecture §5.6 table). */
-export type DetectorTf = '5m' | '1h' | '1d'
+export type DetectorTf = '5m' | '1h' | '1d' | '1w'
 
 export interface DetectorParams {
   /** Threshold as a fraction of the level price (0.001 = 0.1%). */
   pct: number
-  /** ATR multiplier; 0 disables the ATR component (1d uses pct only). */
+  /** ATR multiplier; 0 disables the ATR component (1d and 1w use pct only). */
   k: number
   /** Confirmation window in candles, counted from the break candle (i..i+N-1). */
   n: number

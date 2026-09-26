@@ -147,12 +147,13 @@ def test_levels_crud_and_isolation(pg_client, new_user):
     assert pg_client.delete(f"/v1/levels/{lv['id']}", headers=_auth(a)).status_code == 404
 
 
-def test_only_mvp_timeframes_and_non_ascii_symbol(pg_client, new_user):
+def test_only_tf_bar_timeframes_and_non_ascii_symbol(pg_client, new_user):
     a = new_user()
-    for tf in ("5m", "1h", "1d"):
+    # '1w' needs migration 20260927000000_levels_tf_1w on top of init (all migrations are applied).
+    for tf in ("5m", "1h", "1d", "1w"):
         body = {"symbol": "币安人生USDT", "kind": "support", "price": 1, "tf": tf}
         assert pg_client.post("/v1/levels", json=body, headers=_auth(a)).status_code == 201
-    for tf in ("15m", "4h", "1w"):
+    for tf in ("15m", "4h", "1M"):
         body = {"symbol": "BTCUSDT", "kind": "support", "price": 1, "tf": tf}
         assert pg_client.post("/v1/levels", json=body, headers=_auth(a)).status_code == 422
 

@@ -6,7 +6,8 @@ import { writeFileSync } from 'node:fs'
 
 const OUT = new URL('../fixtures/', import.meta.url)
 const T0 = 1790380800 // 2026-09-26 00:00:00 UTC (aligned to 5m/1h/1d)
-const SPAN = { '5m': 300, '1h': 3600, '1d': 86400 }
+const SPAN = { '5m': 300, '1h': 3600, '1d': 86400, '1w': 604800 }
+const MON = 1789948800 // 2026-09-21 00:00:00 UTC, Monday (Binance weekly klines open Mon 00:00 UTC)
 
 const build = (tf, rows, start = T0) =>
   rows.map(([o, h, l, c], k) => ({ time: start + k * SPAN[tf], open: o, high: h, low: l, close: c, volume: 1 }))
@@ -22,8 +23,8 @@ const ev = (direction, breakIndex, returnIndex, status, candles) => ({
 
 const write = (file, obj) => writeFileSync(new URL(file, OUT), JSON.stringify(obj, null, 2) + '\n')
 
-function detectFixture(file, { description, tf, params, lastClosed, nowSec, rows, levels, expected, expectedAtr }) {
-  const candles = build(tf, rows)
+function detectFixture(file, { description, tf, params, lastClosed, nowSec, rows, levels, expected, expectedAtr, start }) {
+  const candles = build(tf, rows, start)
   const fx = { kind: 'detect', name: file.replace(/\.json$/, ''), description, tf }
   if (params) fx.params = params
   // The closure spec is required by the API: exactly one of nowSec / lastClosed (default lastClosed=true).
@@ -89,6 +90,16 @@ detectFixture('daily_defaults.json', {
   rows: [[99, 99.8, 98.5, 99.5], [99.5, 101, 99.2, 99.8], [99.8, 100.9, 99.6, 100.6], [100.2, 100.25, 99.1, 99.3], [99.3, 101.5, 99.2, 101.0]],
   levels: [{ id: 'PDH', price: 100 }],
   expected: (c) => [{ levelId: 'PDH', events: [ev('up', 1, 1, 'false', c), ev('up', 2, null, 'true', c), ev('down', 3, null, 'true', c)] }],
+})
+
+// 6b. Weekly defaults (pct 0.5% -> X=0.5, N=1, no ATR); closure via nowSec checks TF_SECONDS['1w'].
+detectFixture('weekly_defaults.json', {
+  description: '1w defaults (pct 0.5% -> X=0.5, N=1, no ATR), weeks from Mon 2026-09-21. 0: no break. 1: high 100.4 is inside X (would break on 1d, X=0.3) -> no break. 2: up-break, weekly close 99.9 below -> false on itself. 3: up-break closing above -> true. 4: down-break (low 99.2), weekly close 100.3 back above -> false. 5 is the forming week (nowSec = its open + 3 days) and is dropped although it would break.',
+  tf: '1w', start: MON,
+  nowSec: (c) => c[5].time + 3 * 86400,
+  rows: [[99, 99.8, 98.6, 99.4], [99.4, 100.4, 99.0, 100.2], [100.2, 101.2, 99.8, 99.9], [99.9, 100.9, 99.7, 100.8], [100.8, 101.0, 99.2, 100.3], [100.3, 103, 100.1, 102.8]],
+  levels: [{ id: 'W', price: 100 }],
+  expected: (c) => [{ levelId: 'W', events: [ev('up', 2, 2, 'false', c), ev('up', 3, null, 'true', c), ev('down', 4, 4, 'false', c)] }],
 })
 
 // 7/8. ATR vs pct. 14 candles with TR=10 -> ATR14[13]=10, ATR14[14]=(10*13+13)/14.

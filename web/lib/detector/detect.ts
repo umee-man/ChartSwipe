@@ -11,20 +11,33 @@ import type {
   LevelResult,
 } from './types'
 
-/** Per-TF defaults from architecture §5.6. 1d uses pct only (k = 0). */
+/**
+ * Per-TF defaults from architecture §5.6. 1d and 1w use pct only (k = 0).
+ * 1w: N = 1 — a weekly candle that closes back beyond the level is a false breakout.
+ */
 export const DEFAULT_PARAMS: Readonly<Record<DetectorTf, Readonly<Required<DetectorParams>>>> = Object.freeze({
   '5m': Object.freeze({ pct: 0.001, k: 0.3, n: 6, atrPeriod: 14 }),
   '1h': Object.freeze({ pct: 0.0015, k: 0.3, n: 3, atrPeriod: 14 }),
   '1d': Object.freeze({ pct: 0.003, k: 0, n: 1, atrPeriod: 14 }),
+  '1w': Object.freeze({ pct: 0.005, k: 0, n: 1, atrPeriod: 14 }),
 })
 
 export const TF_SECONDS: Readonly<Record<DetectorTf, number>> = Object.freeze({
   '5m': 300,
   '1h': 3600,
   '1d': 86400,
+  /** Binance weekly klines open Monday 00:00 UTC and last exactly 7 days. */
+  '1w': 604800,
 })
 
-/** Merge per-TF defaults with overrides. For 1d the ATR component is always off. */
+/**
+ * Timeframes whose USER levels count as higher-TF levels for F7 (architecture §5.6):
+ * user levels with `tf` in this list + auto PDH/PDL (+ optional PWH/PWL).
+ * Weekly user levels are at least as significant as daily ones, so they are included.
+ */
+export const HIGHER_TF_LEVEL_TFS: readonly DetectorTf[] = Object.freeze(['1d', '1w'] as const)
+
+/** Merge per-TF defaults with overrides. For 1d and 1w the ATR component is always off. */
 export function resolveParams(tf: DetectorTf, overrides?: Partial<DetectorParams>): Required<DetectorParams> {
   const base = DEFAULT_PARAMS[tf]
   if (!base) throw new RangeError(`unsupported timeframe: ${String(tf)}`)
@@ -34,7 +47,7 @@ export function resolveParams(tf: DetectorTf, overrides?: Partial<DetectorParams
     n: overrides?.n ?? base.n,
     atrPeriod: overrides?.atrPeriod ?? base.atrPeriod,
   }
-  if (tf === '1d') merged.k = 0
+  if (tf === '1d' || tf === '1w') merged.k = 0
   if (!(merged.pct >= 0) || !(merged.k >= 0)) throw new RangeError('pct and k must be >= 0')
   if (!Number.isInteger(merged.n) || merged.n < 1) throw new RangeError('n must be an integer >= 1')
   return merged

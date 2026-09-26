@@ -1,0 +1,95 @@
+{
+  "kind": "detect",
+  "name": "weekly_defaults",
+  "description": "1w defaults (pct 0.5% -> X=0.5, N=1, no ATR), weeks from Mon 2026-09-21. 0: no break. 1: high 100.4 is inside X (would break on 1d, X=0.3) -> no break. 2: up-break, weekly close 99.9 below -> false on itself. 3: up-break closing above -> true. 4: down-break (low 99.2), weekly close 100.3 back above -> false. 5 is the forming week (nowSec = its open + 3 days) and is dropped although it would break.",
+  "tf": "1w",
+  "nowSec": 1793232000,
+  "levels": [
+    {
+      "id": "W",
+      "price": 100
+    }
+  ],
+  "candles": [
+    {
+      "time": 1789948800,
+      "open": 99,
+      "high": 99.8,
+      "low": 98.6,
+      "close": 99.4,
+      "volume": 1
+    },
+    {
+      "time": 1790553600,
+      "open": 99.4,
+      "high": 100.4,
+      "low": 99,
+      "close": 100.2,
+      "volume": 1
+    },
+    {
+      "time": 1791158400,
+      "open": 100.2,
+      "high": 101.2,
+      "low": 99.8,
+      "close": 99.9,
+      "volume": 1
+    },
+    {
+      "time": 1791763200,
+      "open": 99.9,
+      "high": 100.9,
+      "low": 99.7,
+      "close": 100.8,
+      "volume": 1
+    },
+    {
+      "time": 1792368000,
+      "open": 100.8,
+      "high": 101,
+      "low": 99.2,
+      "close": 100.3,
+      "volume": 1
+    },
+    {
+      "time": 1792972800,
+      "open": 100.3,
+      "high": 103,
+      "low": 100.1,
+      "close": 102.8,
+      "volume": 1
+    }
+  ],
+  "expected": [
+    {
+      "levelId": "W",
+      "events": [
+        {
+          "direction": "up",
+          "breakIndex": 2,
+          "returnIndex": 2,
+          "status": "false",
+          "breakTime": 1791158400,
+          "returnTime": 1791158400
+        },
+        {
+          "direction": "up",
+          "breakIndex": 3,
+          "returnIndex": null,
+          "status": "true",
+          "breakTime": 1791763200,
+          "returnTime": null
+        },
+        {
+          "direction": "down",
+          "breakIndex": 4,
+          "returnIndex": 4,
+          "status": "false",
+          "breakTime": 1792368000,
+          "returnTime": 1792368000
+        }
+      ],
+      "falseCount": 2
+    }
+  ]
+}

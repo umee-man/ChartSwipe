@@ -1,4 +1,4 @@
--- Behavioural checks for the init migration (run after stubs + migration).
+-- Behavioural checks for the migrations (run after stubs + all migrations).
 \set ON_ERROR_STOP on
 -- No GRANTs here on purpose: the checks must run on the migration's own
 -- privilege set, exactly as on a Supabase project.
@@ -79,6 +79,13 @@ end $$;
 
 -- positives
 insert into public.levels (symbol, kind, price, price_to, note) values ('BTCUSDT','zone',63000,63400, repeat('я',140));
+-- weekly timeframe (migration 20260927000000_levels_tf_1w) is accepted; '4h' stays rejected above
+insert into public.levels (symbol, kind, price, tf) values ('SOLUSDT','resistance',250,'1w');
+do $$ begin
+  assert (select tf from public.levels where symbol='SOLUSDT') = '1w', 'tf 1w not stored';
+  assert (select count(*) from pg_constraint where conrelid='public.levels'::regclass
+          and pg_get_constraintdef(oid) like '%tf = ANY%') = 1, 'expected exactly one tf check on levels';
+end $$;
 insert into public.symbol_map (symbol, target, target_symbol) values ('BTCUSDT','mt5','BTCUSD');
 insert into public.api_keys (key_hash) values (repeat('ab',32));
 insert into public.watchlists (name, symbols) values ('Основной', array['BTCUSDT']);

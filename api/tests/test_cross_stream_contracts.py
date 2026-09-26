@@ -56,10 +56,20 @@ def _migration_sql() -> str:
     return "\n".join(f.read_text(encoding="utf-8") for f in files)
 
 
+def _last_in_list(sql: str, column: str) -> set[str] | None:
+    found = re.findall(rf"check \({column} in \(([^)]*)\)\)", sql)
+    return set(re.findall(r"'([^']+)'", found[-1])) if found else None
+
+
 def _in_list(sql: str, column: str) -> set[str]:
-    m = re.search(rf"check \({column} in \(([^)]*)\)\)", sql)
-    assert m, f"no `check ({column} in (...))` in migrations"
-    return set(re.findall(r"'([^']+)'", m.group(1)))
+    """Allowed values of the LAST `check (<column> in (...))` across migrations (sorted by name).
+
+    Later migrations replace a check (e.g. 20260927000000_levels_tf_1w re-creates levels_tf_check),
+    so the effective list is the most recent one, not the one in the init migration.
+    """
+    values = _last_in_list(sql, column)
+    assert values is not None, f"no `check ({column} in (...))` in migrations"
+    return values
 
 
 # ---- enums: DB <-> API <-> detector
@@ -67,9 +77,19 @@ def _in_list(sql: str, column: str) -> set[str]:
 
 def test_enums_match_migration():
     sql = _migration_sql()
-    assert _in_list(sql, "tf") == {t.value for t in Timeframe}
+    assert _in_list(sql, "tf") == {t.value for t in Timeframe} == {"5m", "1h", "1d", "1w"}
     assert _in_list(sql, "kind") == {k.value for k in LevelKind}
     assert _in_list(sql, "target") == {"mt5", "tv"}
+
+
+def test_tf_migration_extends_init_list():
+    # Each later tf check must keep every earlier value (no existing row may start violating it).
+    files = sorted(_need(MIGRATIONS).glob("*.sql"))
+    lists = [v for f in files if (v := _last_in_list(f.read_text(encoding="utf-8"), "tf")) is not None]
+    assert len(lists) >= 2, "expected the init tf check and the 1w migration"
+    for earlier, later in zip(lists, lists[1:]):
+        assert earlier <= later
+    assert lists[-1] - lists[0] == {"1w"}
 
 
 def test_detector_timeframes_match_api():

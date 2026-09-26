@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PARAMS,
+  HIGHER_TF_LEVEL_TFS,
+  TF_SECONDS,
   autoLevels,
   autoLevelsAt,
   closedCandles,
@@ -74,6 +76,7 @@ describe('fixtures (shared contract with the Python port)', () => {
       'unclosed_last_nowsec',
       'unclosed_last_flag',
       'daily_defaults',
+      'weekly_defaults',
       'auto_levels',
       'auto_levels_as_of',
       'creep_then_wick',
@@ -123,11 +126,18 @@ describe('params', () => {
     expect(DEFAULT_PARAMS['5m']).toMatchObject({ pct: 0.001, k: 0.3, n: 6 })
     expect(DEFAULT_PARAMS['1h']).toMatchObject({ pct: 0.0015, k: 0.3, n: 3 })
     expect(DEFAULT_PARAMS['1d']).toMatchObject({ pct: 0.003, k: 0, n: 1 })
+    expect(DEFAULT_PARAMS['1w']).toMatchObject({ pct: 0.005, k: 0, n: 1 })
+    expect(TF_SECONDS['1w']).toBe(7 * 86400)
   })
 
-  it('merges overrides and forces k = 0 on 1d', () => {
+  it('merges overrides and forces k = 0 on 1d and 1w', () => {
     expect(resolveParams('5m', { n: 2 })).toEqual({ pct: 0.001, k: 0.3, n: 2, atrPeriod: 14 })
     expect(resolveParams('1d', { k: 5 }).k).toBe(0)
+    expect(resolveParams('1w', { k: 5, n: 2 })).toEqual({ pct: 0.005, k: 0, n: 2, atrPeriod: 14 })
+  })
+
+  it('counts user levels on 1d and 1w as higher-TF levels (F7 source)', () => {
+    expect([...HIGHER_TF_LEVEL_TFS]).toEqual(['1d', '1w'])
   })
 
   it('rejects invalid params', () => {

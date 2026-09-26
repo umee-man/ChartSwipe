@@ -4,6 +4,7 @@ export { trueRange, wilderAtr } from './atr'
 export {
   DEFAULT_PARAMS,
   TF_SECONDS,
+  HIGHER_TF_LEVEL_TFS,
   resolveParams,
   closedCandles,
   thresholdAt,

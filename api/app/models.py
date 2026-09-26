@@ -34,11 +34,16 @@ class LevelKind(StrEnum):
 
 
 class Timeframe(StrEnum):
-    """The three timeframes of the MVP (F3, detector table §5.6; levels.tf check in the migration)."""
+    """Timeframes a level can be placed on (F3 TF bar, detector table §5.6; levels.tf check in migrations).
+
+    '1w' was added by supabase/migrations/20260927000000_levels_tf_1w.sql. Pine export and MT5 sync
+    do not emit tf, so their output formats are unaffected.
+    """
 
     m5 = "5m"
     h1 = "1h"
     d1 = "1d"
+    w1 = "1w"
 
 
 # Prices travel as JSON numbers but are kept as Decimal internally (numeric in Postgres)

@@ -65,7 +65,8 @@ def test_client_supplied_id_and_conflict(client, auth_a, auth_b, add_level):
         {"symbol": "   "},
         {"tf": "15m"},
         {"tf": "4h"},
-        {"tf": "1w"},
+        {"tf": "1M"},
+        {"tf": "1W"},  # case-sensitive: Binance/DB value is "1w"
         {"color": "red"},
         {"color": "#12345"},
         {"unexpected": 1},
@@ -77,10 +78,26 @@ def test_create_validation(client, auth_a, patch):
     assert resp.status_code == 422, resp.text
 
 
-@pytest.mark.parametrize("tf", ["5m", "1h", "1d"])
+@pytest.mark.parametrize("tf", ["5m", "1h", "1d", "1w"])
 def test_all_timeframes_accepted(add_level, auth_a, tf):
-    # Exactly the three MVP timeframes (F3, §5.6) == levels.tf check in supabase/migrations.
+    # Exactly the TF-bar timeframes (F3, §5.6) == last levels.tf check across supabase/migrations.
     assert add_level(auth_a, tf=tf)["tf"] == tf
+
+
+def test_weekly_level_patch_and_exports_unchanged(client, auth_a, add_level, issue_key):
+    # '1w' round-trips through PATCH/GET; Pine export and MT5 sync carry no tf, so a weekly
+    # level is exported exactly like any other.
+    key = issue_key(auth_a)["key"]
+    lv = add_level(auth_a, tf="1d", price=64200)
+    add_level(auth_a, tf="1w", kind="zone", price=60000, price_to=61000)
+    patched = client.patch(f"/v1/levels/{lv['id']}", json={"tf": "1w"}, headers=auth_a)
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["tf"] == "1w"
+    assert {x["tf"] for x in client.get("/v1/levels", headers=auth_a).json()} == {"1w"}
+    assert client.get("/v1/export/pine", headers=auth_a).text == "BTCUSDT:64200s,60000-61000z"
+    csv_lines = client.get("/v1/sync/mt5", params={"since": 0}, headers={"X-API-Key": key}).text.split("\n")
+    assert csv_lines[1] == "id,symbol,kind,price,price_to,color,deleted,updated_at"
+    assert len([ln for ln in csv_lines[2:] if ln]) == 2
 
 
 @pytest.mark.parametrize("symbol", ["币安人生USDT", "1000PEPEUSDT", "X" * 32, "A"])
