@@ -5,6 +5,13 @@ import type { Candle, WsKlineEvent } from './types'
 export const FSTREAM_URL = 'wss://fstream.binance.com/stream'
 /** Hard cap on live subscriptions: current ticker + 2 neighbours (arch §4, §10). */
 export const MAX_LIVE_STREAMS = 3
+/**
+ * Coalesce rapid setDesired() calls (fast swipes) into one UNSUBSCRIBE + one SUBSCRIBE.
+ * fstream accepts at most 10 incoming messages per second per connection.
+ */
+export const SYNC_DEBOUNCE_MS = 150
+/** A connection counts as stable (backoff resets) after this long or on its first kline. */
+export const STABLE_AFTER_MS = 10_000
 
 export function klineStream(symbol: string, interval: string): string {
   return `${symbol.toLowerCase()}@kline_${interval}`
@@ -86,6 +93,8 @@ export class WsManager {
   private reqId = 1
   private attempt = 0
   private reconnectTimer: unknown = null
+  private syncTimer: unknown = null
+  private stableTimer: unknown = null
   private disposed = false
 
   constructor(opts: WsManagerOptions = {}) {
@@ -118,14 +127,39 @@ export class WsManager {
       this.connect()
       return
     }
-    if (this.socket.readyState === OPEN) this.sync()
+    if (this.socket.readyState === OPEN) this.scheduleSync()
     // If still CONNECTING, onopen will sync.
+  }
+
+  /** Current backoff attempt counter (exposed for tests/diagnostics). */
+  get reconnectAttempt(): number {
+    return this.attempt
   }
 
   dispose(): void {
     this.disposed = true
     this.listeners.clear()
     this.closeSocket()
+  }
+
+  private scheduleSync(): void {
+    if (this.syncTimer !== null) return
+    this.syncTimer = this.setTimer(() => {
+      this.syncTimer = null
+      if (this.socket?.readyState === OPEN) this.sync()
+    }, SYNC_DEBOUNCE_MS)
+  }
+
+  private clearTimers(): void {
+    for (const id of [this.syncTimer, this.stableTimer]) if (id !== null) this.clearTimer(id)
+    this.syncTimer = null
+    this.stableTimer = null
+  }
+
+  private markStable(): void {
+    this.attempt = 0
+    if (this.stableTimer !== null) this.clearTimer(this.stableTimer)
+    this.stableTimer = null
   }
 
   private sync(): void {
@@ -146,7 +180,12 @@ export class WsManager {
     this.socket = ws
     this.active = []
     ws.onopen = () => {
-      this.attempt = 0
+      // Do not reset the backoff yet: a server that accepts and immediately drops would otherwise
+      // cause a tight 1 s reconnect loop. Reset after STABLE_AFTER_MS or on the first kline.
+      if (this.stableTimer !== null) this.clearTimer(this.stableTimer)
+      this.stableTimer = this.setTimer(() => this.markStable(), STABLE_AFTER_MS)
+      if (this.syncTimer !== null) this.clearTimer(this.syncTimer)
+      this.syncTimer = null
       this.sync()
     }
     ws.onmessage = (ev) => this.handleMessage(ev.data)
@@ -157,6 +196,7 @@ export class WsManager {
       if (this.socket !== ws) return
       this.socket = null
       this.active = []
+      this.clearTimers()
       this.scheduleReconnect()
     }
   }
@@ -171,6 +211,7 @@ export class WsManager {
   }
 
   private closeSocket(): void {
+    this.clearTimers()
     if (this.reconnectTimer !== null) {
       this.clearTimer(this.reconnectTimer)
       this.reconnectTimer = null
@@ -199,6 +240,7 @@ export class WsManager {
     if (!this.active.includes(msg.stream)) return
     const candle = parseWsKline(data.k)
     if (!candle) return
+    if (this.stableTimer !== null) this.markStable()
     const evt = { stream: msg.stream, symbol: data.k.s, interval: data.k.i, candle, closed: data.k.x }
     for (const fn of this.listeners) fn(evt)
   }
