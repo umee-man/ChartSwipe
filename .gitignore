@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# nuxt / build
+.nuxt/
+.output/
+.data/
+dist/
+.cache/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# logs / os / ide
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# mt5 build output
+*.ex5
+
+# claude local
+.claude/settings.local.json

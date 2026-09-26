@@ -1,0 +1,183 @@
+# ChartSwipe — архитектура
+
+> Источник истины для всей логики. Код обязан соответствовать этому документу; при расхождении сначала правится документ.
+> Основа: спецификация от 26.09.2026 (@Stan). Решения по открытым вопросам — в разделе «Решения (ADR)».
+
+## 1. Рамки MVP
+
+| Входит | Не входит (v1+) |
+|---|---|
+| Лента (F1), график (F2), 3 ТФ (F3), уровни с магнитом (F4) | Push-алерты (F8), шаринг (F9) |
+| Синк уровней: Supabase + FastAPI, MT5 EA, Pine-строка (F5) | Chrome-расширение, маппинг тикеров в UI |
+| Вотчлисты с импортом (F6) | Форекс/индексы, мульти-биржа (Bybit/OKX) |
+| Ложные пробои дневных уровней, клиентский TS-детектор (F7) | Серверный Python-детектор, «ЛП сегодня» для пушей |
+| Один пользователь (сам автор) | Тарифы Free/Pro, онбординг, лендинг |
+
+Рынок: **только крипта, Binance USDⓈ-M Futures** (перпы).
+
+## 2. Решения (ADR)
+
+| # | Решение | Почему |
+|---|---|---|
+| A1 | TradingView в MVP — только Pine-строка | Нет публичного API; расширение хрупкое, уходит в v1 |
+| A2 | Источник свечей — Binance Futures (`fapi`/`fstream`) | Ближе к CFD пропа (BTCUSD), больше ликвидности |
+| A3 | MVP для себя, без монетизации | Меньше кода; тарифы заложим в v1 |
+| A4 | Источники ленты (top50, движение дня, ЛП сегодня) в MVP считаются **на клиенте** из публичного API Binance; `GET /v1/feed` — в v1 | Сервер не ходит на биржу в MVP, меньше инфраструктуры |
+| A5 | Сервер хранит только пользователей, уровни, вотчлисты, маппинг, ключи. Свечи — никогда | Лимиты бирж расходуются с IP клиента |
+| A6 | Синк EA по курсору `updated_at` сервера, а не часам клиента | Нет рассинхрона часов VPS/телефона |
+| A7 | Цвет в CSV для EA отдаётся в **BGR** (формат `color` в MQL5) | В MQL5 `color` = `0x00BBGGRR`; RGB дал бы неверные цвета |
+| A8 | Рабочее название — ChartSwipe | Не блокирует разработку |
+
+## 3. Структура репозитория (монорепо)
+
+```
+ChartSwipe/
+├─ plan.md                  # план и статусы
+├─ architecture.md          # этот документ
+├─ web/                     # Nuxt 3 PWA (клиент)
+│  ├─ components/           # FeedSlide, ChartView, TfBar, LevelLabel, SideActions
+│  ├─ composables/          # useCandles, useGestures, useMagnet, useLevels
+│  ├─ stores/               # Pinia: feed, levels, watchlists, settings
+│  ├─ lib/
+│  │  ├─ binance/           # REST klines/ticker + WS менеджер (≤ 3 потока)
+│  │  ├─ cache/             # IndexedDB-кэш свечей
+│  │  ├─ detector/          # F7: детектор ложных пробоев (чистые функции + тесты)
+│  │  └─ pine/              # генератор Pine-строки (дублирует серверный для офлайна)
+│  └─ pages/                # feed, watchlists, levels, integrations, settings
+├─ api/                     # FastAPI (Python 3.12)
+│  ├─ app/routers/          # levels, watchlists, sync, export, keys
+│  ├─ app/auth.py           # JWT Supabase + X-API-Key
+│  └─ tests/
+├─ supabase/migrations/     # SQL-схема, RLS, триггеры
+├─ mt5/ChartSwipeSync.mq5   # Expert Advisor
+├─ pine/chartswipe.pine     # индикатор TradingView
+└─ docker/                  # Dockerfile'ы + compose для Dokploy
+```
+
+## 4. Потоки данных
+
+```mermaid
+flowchart LR
+  App[PWA] -->|klines REST + kline WS| Bn[Binance Futures]
+  App -->|JWT: уровни, вотчлисты| API[FastAPI]
+  API --> DB[(Supabase Postgres)]
+  EA[MT5 EA] -->|X-API-Key, poll 5 с| API
+  App -.->|строка вручную| Pine[Pine-индикатор]
+```
+
+- **Свечи:** `GET https://fapi.binance.com/fapi/v1/klines?symbol=&interval=&limit=300` (вес 2). История: тот же запрос с `endTime`.
+- **Живая свеча:** `wss://fstream.binance.com/ws/<symbol>@kline_<interval>`. Одновременно не больше 3 соединений/подписок (текущий + 2 соседа), лишние закрываются при свайпе. Предпочтительно один combined stream с `SUBSCRIBE`/`UNSUBSCRIBE`.
+- **Лента top50 / движение дня:** `GET /fapi/v1/ticker/24hr` (без symbol, вес 40) раз в 60 с; фильтр `quoteVolume` (top50) или `|priceChangePercent| > 5`.
+- **ЛП сегодня (A4):** клиент тянет `1d`-свечи (limit 3) по top-50 и прогоняет детектор по PDH/PDL. Вес ≈ 50 × 1 = 50.
+- **Уровни:** оптимистичное обновление в Pinia → `POST/PATCH/DELETE /v1/levels` с дебаунсом перетаскивания 300 мс. Цель: на сервере < 1 с.
+
+## 5. Клиент
+
+### 5.1 Стек
+Nuxt 3 + TypeScript (SPA-режим, `ssr: false`), `@vite-pwa/nuxt`, lightweight-charts **v5**, Swiper (vertical + virtual, 3 слайда в DOM), Pinia, IndexedDB (`idb`), `@supabase/supabase-js` (только Auth), Sentry.
+
+### 5.2 Загрузка и кэш
+- При открытии тикера параллельно грузятся все 3 ТФ из кнопок (F3). Переключение ТФ — только `series.setData` из памяти (< 100 мс).
+- Предзагрузка 2 следующих тикеров (все 3 ТФ) при остановке на слайде.
+- IndexedDB-ключ `binance-f:<symbol>:<tf>`; показываем кэш сразу, затем догружаем хвост.
+- Бюджет памяти < 150 МБ / 100 свайпов: в памяти держим свечи только для окна ±3 тикера, график уничтожается (`chart.remove()`) при выходе слайда из virtual-окна.
+
+### 5.3 Жесты (порядок разрешения)
+1. Палец на плашке уровня → режим «уровень»: лента и пан заблокированы, drag двигает уровень, свайп плашки вправо > 60 px — удаление с undo 5 с.
+2. Долгий тап 400 мс без движения > 8 px → новый уровень (вибро `navigator.vibrate(15)`), тип = текущий выбранный в правой колонке.
+3. Первые 12 px движения: угол к вертикали < 30° → свайп ленты, иначе пан графика (передаётся lightweight-charts).
+4. Свайп ленты засчитывается при смещении > 20% высоты или скорости > 0,5 px/мс.
+5. Пинч → масштаб по времени; вертикальный drag по ценовой шкале → масштаб по цене; двойной тап → `fitContent` / сброс.
+6. Отступ 20 px от левого края экрана не принимает жесты (свайп «назад» iOS Safari).
+
+Реализация: собственный `useGestures` поверх pointer events; Swiper управляется программно (`allowTouchMove=false`, `slideNext()/slidePrev()`), чтобы решение принимал наш арбитр, а не Swiper.
+
+### 5.4 Магнит
+Для точки тапа (x, y) берём свечи в окне ±3 бара от x; кандидаты — `high`, `low`, `open`, `close`. Переводим в пиксели через `series.priceToCoordinate`; берём ближайший кандидат, если расстояние ≤ `magnetRadius` (по умолчанию 12 px), иначе сырая цена. Цена округляется до `tickSize` символа (из `/fapi/v1/exchangeInfo`, кэш на сутки).
+
+### 5.5 Уровни на графике
+- `support` / `resistance` → `series.createPriceLine` (зелёный `#2E7D32` / красный `#C62828`).
+- `zone` → два price line + заливка полупрозрачным прямоугольником (series primitive), синий `#1565C0`.
+- Виден на всех ТФ; на плашке — ТФ постановки и счётчик «ЛП ×N».
+- Заметка до 140 символов (валидация и на клиенте, и в БД).
+
+### 5.6 Детектор ложных пробоев (F7)
+Чистая функция в `web/lib/detector`, покрыта unit-тестами, без зависимостей от UI.
+
+Вход: закрытые свечи ТФ разметки, список дневных уровней (пользовательские с `tf='1d'` + авто PDH/PDL, опционально PWH/PWL), параметры.
+
+Правило для пробоя вверх (вниз — зеркально):
+1. Свеча `i`: `high[i] > level + X`, где `X = max(level × pct, k × ATR14)` (для Д — только pct).
+2. Далее в пределах свечей `i..i+N-1` ищем первую `j` с `close[j] < level` → **ложный**, маркер ▼ на `j`, заливка `i..j`.
+3. Если N свечей закрылись выше уровня → **настоящий**.
+4. Если свечей после `i` меньше N и возврата нет → **пробой идёт** (жёлтый).
+5. Последняя (незакрытая) свеча в расчёт не берётся — разметка не перерисовывается.
+
+| ТФ | pct | k·ATR14 | N |
+|---|---|---|---|
+| 5m | 0,1% | 0,3 | 6 |
+| 1h | 0,15% | 0,3 | 3 |
+| 1d | 0,3% | — | 1 |
+
+Параметры — в настройках (Pinia + localStorage). Серверная Python-версия (v1) должна проходить **тот же набор фикстур** (`detector/fixtures/*.json`).
+
+## 6. База данных (Supabase)
+
+Таблицы из спецификации, со следующими уточнениями:
+
+- `levels`: добавить `created_at timestamptz default now()`; триггер `before update` ставит `updated_at = now()`; удаление только мягкое (`deleted_at = now()`, `updated_at = now()`).
+- `levels`: `check (kind <> 'zone' or price_to is not null)`, `check (price > 0)`.
+- `symbol_map.target` — `check (target in ('mt5','tv'))`.
+- `api_keys`: индекс по `key_hash` (поиск ключа на каждом sync-запросе).
+- RLS на всех таблицах: `using (user_id = auth.uid())` для select/insert/update/delete. Бэкенд ходит с service role **только** в sync-эндпоинтах (по API-ключу), всё остальное — от имени пользователя с его JWT.
+
+## 7. API (FastAPI, префикс `/v1`)
+
+MVP-эндпоинты: `levels` (GET/POST/PATCH/DELETE), `watchlists` (GET/PUT), `sync/mt5`, `export/pine`, `keys` (POST/DELETE). `feed`, `sync/tv`, `push/subscribe` — v1.
+
+- **Auth:** JWT Supabase проверяется по JWKS проекта; `X-API-Key` → `sha256` → поиск в `api_keys` где `revoked_at is null`, обновление `last_used_at`.
+- **Rate limit** `/sync/*`: 30 запросов/мин на ключ (in-memory токен-бакет; одна реплика в MVP).
+- **`GET /v1/sync/mt5?since=<unix_ts>`** — `text/csv`:
+  ```
+  #cursor,1790380740
+  id,symbol,kind,price,price_to,color,deleted,updated_at
+  9f1c...,BTCUSD.r,support,64200,,0x327D2E,0,1790380712
+  ```
+  - Строки с `updated_at > since`, включая удалённые (`deleted=1`).
+  - Первая строка `#cursor` — `max(updated_at)` на сервере; EA передаёт его следующим `since` (A6). При `since=0` — полный снимок без удалённых.
+  - `symbol` — из `symbol_map(target='mt5')`, иначе исходный символ; суффикс брокера добавляет EA.
+  - `color` — BGR (A7).
+- **`GET /v1/export/pine`** — `text/plain`: `BTCUSDT:64200s,65800r,63000-63400z;ETHUSDT:3120s`. Коды: `s` support, `r` resistance, `z` zone.
+
+## 8. MT5 Expert Advisor
+
+- `OnInit` → `EventSetTimer(5)`; `OnTimer` → `WebRequest("GET", url+"/v1/sync/mt5?since="+cursor, "X-API-Key: ...")`.
+- Входные параметры: `ApiUrl`, `ApiKey`, `SymbolSuffix` (`.r`, `m`, `-P`), `ShowAllSymbols`.
+- Объекты: `OBJ_HLINE` / `OBJ_RECTANGLE` с именем `CS_<level_id>`, рисуются на графиках, где `ChartSymbol()` совпадает с символом уровня (+ суффикс). Чужие объекты не трогаются.
+- `deleted=1` → `ObjectDelete` по имени. Курсор хранится в `GlobalVariable` терминала, чтобы переживать рестарт.
+- EA не содержит торговых функций (требование пропа).
+- Пользователь добавляет `ApiUrl` в «Сервис → Настройки → Советники → Разрешить WebRequest».
+
+## 9. Pine-индикатор
+
+- `input.text_area` со строкой из приложения; парсинг `str.split` по `;`, `:`, `,`.
+- Сопоставление: `syminfo.ticker` без суффикса `.P` (перпы Binance на TV — `BTCUSDT.P`) == символ в строке.
+- `line.new(..., extend=extend.both)` для s/r, `box.new` для зоны. Лимит 500 линий — достаточно.
+
+## 10. Нефункциональные требования
+
+| Параметр | Цель | Как проверяем |
+|---|---|---|
+| Холодный старт PWA | < 2 с на 4G | Lighthouse, throttling «Fast 4G» |
+| Переход к след. тикеру | < 150 мс, 60 fps | Performance-профиль, предзагрузка 2 тикеров |
+| Переключение ТФ | < 100 мс | данные уже в памяти |
+| Сохранение уровня | < 1 с | лог времени ответа API |
+| Уровень в MT5 | < 10 с | poll 5 с + сеть |
+| WS-потоков | ≤ 3 | менеджер подписок |
+| Память | < 150 МБ / 100 свайпов | Chrome memory snapshot |
+
+Безопасность: ключи только как sha256 и показываются один раз; RLS везде; service role только в бэкенде; приложение не хранит ключи бирж и не торгует.
+
+## 11. Деплой
+
+Docker-образы `web` (статическая сборка Nuxt за nginx) и `api` (uvicorn) → Dokploy на существующем VPS, HTTPS обязателен (PWA + WebRequest MT5). Supabase — облачный проект. Sentry — клиент и API.
