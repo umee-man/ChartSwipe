@@ -33,35 +33,38 @@
 - [?] Источник «Избранное» + шторка «Список избранного»: удаление, «Скачать список» (Blob + `<a download>`), «Скопировать»
 
 ### Дни 4–6. Уровни и Supabase
-- [ ] Миграции: 5 таблиц + уточнения из architecture §6 + RLS + триггер `updated_at`
+- [x] Миграции: 5 таблиц + уточнения из architecture §6 + RLS + триггер `updated_at` — `supabase/validate/checks.sql` проходит (PGlite/embedded Postgres), api-тесты гоняются на этой миграции; `levels` без hard DELETE
+- [?] Применить миграцию к облачному Supabase-проекту (`supabase db push`) и прогнать `supabase/validate/validate.sh` (нужен Docker)
 - [ ] Supabase Auth (magic link) в клиенте
 - [ ] Долгий тап 400 мс → уровень, вибро, магнит 12 px, округление до tickSize
 - [ ] Типы support / resistance / zone, цвета
 - [ ] Перетаскивание плашки, удаление свайпом вправо с undo 5 с
 - [ ] Заметка ≤ 140 символов
-- [ ] Детектор ложных пробоев (TS) + фикстуры + unit-тесты
+- [x] Детектор ложных пробоев (TS) + фикстуры + unit-тесты — `web/lib/detector`, 19 фикстур, vitest 41/41, tsc ок (правило пересечения порога и `close == level` ждут фиксации в §5.6; в `web/vitest.config.ts` ещё не подключён `lib/**/*.test.ts`)
 - [ ] Визуал ЛП: заливка, маркеры ▲▼, статусы, счётчик «ЛП ×N»
 - [ ] Источник ленты «ЛП сегодня» (клиентский расчёт, A4)
 
 ### Дни 7–8. FastAPI
-- [ ] Каркас FastAPI, auth (JWKS + X-API-Key), rate limit sync
-- [ ] `/v1/levels` CRUD (мягкое удаление), `/v1/watchlists`
-- [ ] `/v1/keys` выпуск/отзыв (sha256, показ один раз)
-- [ ] `/v1/sync/mt5` CSV с курсором, маппинг, BGR-цвет
-- [ ] `/v1/export/pine`
-- [ ] pytest на все эндпоинты
+- [x] Каркас FastAPI, auth (JWKS + X-API-Key), rate limit sync (30/мин на ключ + лимит по IP), Sentry по `SENTRY_DSN`
+- [x] `/v1/levels` CRUD (мягкое удаление), `/v1/watchlists`
+- [x] `/v1/keys` выпуск/отзыв (sha256, показ один раз)
+- [x] `/v1/sync/mt5` CSV с курсором, маппинг, BGR-цвет — контракт с EA проверен тестом `api/tests/test_cross_stream_contracts.py`
+- [x] `/v1/export/pine` — строка проходит парсер индикатора (`pine/tests/pine_sim.py`)
+- [x] pytest на все эндпоинты — 147 passed (вкл. реальную миграцию на embedded Postgres)
+- [?] API против реального Supabase (JWKS + БД) и `docker build`
 - [ ] Экран «Интеграции»: ключ API, кнопка «Скопировать для TV»
 
 ### Дни 9–11. MT5 EA
-- [ ] `ChartSwipeSync.mq5`: таймер 5 с, WebRequest, парсинг CSV, HLINE/RECTANGLE `CS_<id>`, удаление, курсор в GlobalVariable, суффикс брокера
-- [ ] Тест на демо-счёте
-- [ ] Тест на счёте CFT (+ проверить правила пропа по сторонним EA)
+- [x] `ChartSwipeSync.mq5` (+ `ChartSwipeCsv.mqh`, `tests/ChartSwipeCsvTest.mq5`) — MetaEditor: 0 errors, 0 warnings: таймер 5 с, WebRequest, парсинг CSV, HLINE/RECTANGLE `CS_<id>`, удаление, курсор в GlobalVariable, суффикс брокера
+- [?] Прогнать `ChartSwipeCsvTest` в терминале
+- [?] Тест на демо-счёте
+- [?] Тест на счёте CFT (+ проверить правила пропа по сторонним EA)
 
 ### Дни 12–14. Pine, полировка, деплой
-- [ ] `chartswipe.pine`: парсинг строки, фильтр по `syminfo.ticker` без `.P`
+- [?] `chartswipe.pine`: парсинг строки, фильтр по `syminfo.ticker` без `.P` — Python-зеркало парсера 11/11 векторов; компиляция в Pine Editor не проверена
 - [ ] Экраны: Вотчлисты (drag-сортировка, импорт текстом и .txt TV), Уровни (поиск), Настройки
 - [ ] Полировка жестов на iOS Safari и Android Chrome
-- [ ] Docker + Dokploy, HTTPS, Sentry
+- [~] Docker + Dokploy, HTTPS, Sentry — `web/Dockerfile` (node:24-alpine, Nitro node-server :3000, healthcheck) готов, локально образ не собран (Docker daemon не запущен); осталось: Dokploy-приложение + домен/HTTPS, `api`-образ, Sentry
 - [ ] Проверка NFR (architecture §10)
 
 **Критерий готовности MVP:** пользуюсь сам каждый день неделю.
@@ -90,6 +93,16 @@ Push-алерты (воркер + Web Push), серверный детектор
 13. **Избранное:** меню → «Список избранного…»: удаление, «Скачать список» сохраняет `chartswipe-favorites-ГГГГ-ММ-ДД.txt` с `BINANCE:BTCUSDT.P,…` (проверить импорт в TradingView), «Скопировать» кладёт тот же текст в буфер, «Листать избранное» включает источник.
 14. **Мелкие монеты:** в «Движение дня»/«Топ-50» у монет с ценой < 0,01 цена в шапке и на шкале показана с достаточной точностью (не 0.00).
 15. **Производительность:** переход между тикерами плавный; при 50+ свайпах вкладка не тормозит (DevTools → Performance/Memory по возможности).
+
+**Дни 4–14 — бэкенд, MT5, TradingView** (нужны Supabase-проект, терминал MT5, TradingView)
+16. **Миграция:** `npx supabase link --project-ref <ref>` → `npx supabase db push`. В Dashboard → Table Editor есть 5 таблиц (`levels`, `watchlists`, `symbol_map`, `api_keys`, `push_subscriptions`), у всех включён RLS. Если запущен Docker Desktop — `bash supabase/validate/validate.sh` заканчивается `ALL CHECKS PASSED`.
+17. **API локально:** `cd api` → скопировать `.env.example` в `.env`, вписать `REPOSITORY=postgres`, `DATABASE_URL` (Session pooler) и `SUPABASE_JWKS_URL` → `uvicorn app.main:create_app --factory --port 8000`. `GET http://localhost:8000/health` → 200; `/v1/sync/mt5` без ключа → 401.
+18. **Ключ API:** с JWT пользователя `POST /v1/keys` → ключ показан один раз; в таблице `api_keys` лежит только `key_hash` (64 hex) и `key_prefix`. Повторно ключ не показывается; `DELETE /v1/keys/<id>` → ключ больше не работает (401).
+19. **Уровни:** `POST /v1/levels` (support 64200 BTCUSDT) → `GET /v1/export/pine` возвращает `BTCUSDT:64200s`. `DELETE` → уровень пропадает из экспорта, но строка в БД остаётся с `deleted_at`.
+20. **MT5 тест-скрипт:** скопировать `mt5/ChartSwipeCsv.mqh` и `mt5/tests/ChartSwipeCsvTest.mq5` в `MQL5/Scripts`, скомпилировать, запустить на любом графике → во вкладке «Эксперты» строка `ChartSwipeCsvTest: N passed, 0 failed -> OK`.
+21. **MT5 EA на демо:** `ChartSwipeSync.mq5` + `ChartSwipeCsv.mqh` в `MQL5/Experts`, добавить адрес API в «Сервис → Настройки → Советники → Разрешить WebRequest» (для локального теста — `http://127.0.0.1:8000`), указать `ApiKey` и `SymbolSuffix` брокера. Создать уровень через API → в течение ~10 с на графике появляется линия `CS_<id>` нужного цвета (поддержка — зелёная, сопротивление — красная, зона — синий прямоугольник). Изменить цену → линия сдвигается; удалить → линия исчезает. Ручные объекты без префикса `CS_` не трогаются. Перезапуск терминала — уровни на месте, без дублей. Автоторговля не нужна, торговых операций нет.
+22. **MT5 на CFT:** то же на счёте пропа; убедиться, что правила пропа разрешают сторонние советники без торговли.
+23. **TradingView:** Pine Editor → вставить `pine/chartswipe.pine` → «Добавить на график» компилируется без ошибок. В настройках индикатора вставить строку из `GET /v1/export/pine` (или `BTCUSDT:64200s,65800r,63000-63400z;ETHUSDT:3120s`) → на `BINANCE:BTCUSDT.P` видны 2 линии и синяя зона, на `ETHUSDT.P` — одна линия; панель статуса показывает число уровней и 0 ошибок.
 
 ## Открытые вопросы
 - [ ] Детектор ложных пробоев «переносится из сканера» — где лежит существующий сканер? Нужен путь/репозиторий, чтобы переиспользовать логику и фикстуры.
