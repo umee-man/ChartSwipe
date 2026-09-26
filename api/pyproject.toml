@@ -1,0 +1,45 @@
+[project]
+name = "chartswipe-api"
+version = "0.1.0"
+description = "ChartSwipe backend: levels, watchlists, API keys, MT5 sync and Pine export (architecture.md §7)"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.141.1,<0.142",
+    "uvicorn[standard]>=0.54.0,<0.55",
+    "pydantic>=2.13.5,<3",
+    "pydantic-settings>=2.15.0,<3",
+    "pyjwt[crypto]>=2.15.0,<3",
+    "cryptography>=50.0.1",
+    "asyncpg>=0.31.0,<0.32",
+    "httpx>=0.28.1,<0.29",
+    # Error reporting (architecture §11); active only when SENTRY_DSN is set.
+    "sentry-sdk[fastapi]>=2.70.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1,<10",
+    "pytest-asyncio>=1.4.0,<2",
+]
+# Embedded Postgres for tests/test_postgres_repo.py (skipped when absent and TEST_DATABASE_URL unset).
+pgtest = [
+    "pgserver>=0.1.4,<0.2",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra"
+filterwarnings = [
+    # starlette's TestClient nags about httpx -> httpx2; harmless for tests.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
