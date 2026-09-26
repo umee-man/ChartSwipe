@@ -1,6 +1,7 @@
 // Feed store: current source, ordered ticker list, position, 24h tickers and exchangeInfo (arch §4, ADR A4).
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
+import { fallbackTickSize } from '~/lib/binance/parse'
 import { fetchExchangeInfo, fetchTickers24h } from '~/lib/binance/rest'
 import type { SymbolInfo, Ticker24h } from '~/lib/binance/types'
 import { readExchangeInfo, writeExchangeInfo } from '~/lib/cache/candles'
@@ -18,6 +19,7 @@ function isSource(v: unknown): v is FeedSourceId {
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let exchangeInfoLoading: Promise<void> | null = null
 
 export const useFeedStore = defineStore('feed', {
   state: () => {
@@ -67,19 +69,25 @@ export const useFeedStore = defineStore('feed', {
       this.startPolling()
     },
 
-    async loadExchangeInfo() {
-      const cached = await readExchangeInfo()
-      if (cached) {
-        this.exchangeInfo = markRaw(cached)
-        return
-      }
-      try {
-        const info = await fetchExchangeInfo()
-        this.exchangeInfo = markRaw(info)
-        void writeExchangeInfo(info)
-      } catch (err) {
-        this.error = err instanceof Error ? err.message : String(err)
-      }
+    /** Cached (24 h) exchangeInfo, else network. Concurrent calls share one request. */
+    loadExchangeInfo(): Promise<void> {
+      exchangeInfoLoading ??= (async () => {
+        const cached = await readExchangeInfo()
+        if (cached) {
+          this.exchangeInfo = markRaw(cached)
+          return
+        }
+        try {
+          const info = await fetchExchangeInfo()
+          this.exchangeInfo = markRaw(info)
+          void writeExchangeInfo(info)
+        } catch (err) {
+          this.error = err instanceof Error ? err.message : String(err)
+        }
+      })().finally(() => {
+        exchangeInfoLoading = null
+      })
+      return exchangeInfoLoading
     },
 
     async refreshTickers() {
@@ -90,6 +98,8 @@ export const useFeedStore = defineStore('feed', {
         this.tickers = markRaw(map)
         this.tickersAt = Date.now()
         this.error = null
+        // exchangeInfo failed earlier (network/429) — retry piggy-backed on the ticker poll.
+        if (!this.exchangeInfo && this.initialized) void this.loadExchangeInfo()
       } catch (err) {
         this.error = err instanceof Error ? err.message : String(err)
       }
@@ -132,8 +142,9 @@ export const useFeedStore = defineStore('feed', {
       this.index = clampIndex(i, this.symbols.length)
     },
 
+    /** Real tickSize from exchangeInfo, else a precision derived from the last price (low-priced coins). */
     tickSize(symbol: string): number {
-      return this.exchangeInfo?.[symbol]?.tickSize ?? 0.01
+      return this.exchangeInfo?.[symbol]?.tickSize ?? fallbackTickSize(this.tickers[symbol]?.lastPrice)
     },
   },
 })

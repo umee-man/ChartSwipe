@@ -16,19 +16,8 @@ export function downloadText(filename: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
-/**
- * Copy text to the clipboard. The async Clipboard API needs a secure context (HTTPS/localhost);
- * on plain-HTTP LAN dev URLs we fall back to a hidden textarea + execCommand.
- */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // fall through to the legacy path
-  }
+/** Legacy synchronous copy via a hidden textarea. Must run inside the user gesture (iOS). */
+export function copyTextSync(text: string): boolean {
   const ta = document.createElement('textarea')
   ta.value = text
   ta.setAttribute('readonly', '')
@@ -45,4 +34,19 @@ export async function copyText(text: string): Promise<boolean> {
   }
   ta.remove()
   return ok
+}
+
+/**
+ * Copy text to the clipboard. Call directly from a click handler.
+ * - Insecure context (plain-HTTP LAN dev URL): the Clipboard API is absent, so the synchronous
+ *   execCommand path runs first, before any await, while the user gesture is still active.
+ * - Secure context: async Clipboard API; if it rejects, a best-effort synchronous fallback
+ *   (may be refused on iOS because the gesture has ended by then).
+ */
+export function copyText(text: string): Promise<boolean> {
+  if (!(navigator.clipboard && window.isSecureContext)) return Promise.resolve(copyTextSync(text))
+  return navigator.clipboard.writeText(text).then(
+    () => true,
+    () => copyTextSync(text),
+  )
 }
