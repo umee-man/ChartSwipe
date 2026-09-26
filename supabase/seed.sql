@@ -1,0 +1,22 @@
+-- ChartSwipe seed (used by `supabase db reset` locally).
+-- Intentionally contains no user-owned rows: every table references
+-- auth.users, and real user ids must never be committed.
+-- To get sample data locally: sign in once via magic link, then run the
+-- block below in the SQL editor with your own id from auth.users.
+--
+-- do $$
+-- declare uid uuid := (select id from auth.users order by created_at limit 1);
+-- begin
+--   if uid is null then return; end if;
+--   insert into public.watchlists (user_id, name, symbols, position)
+--   values (uid, 'Основной', array['BTCUSDT','ETHUSDT','SOLUSDT'], 0);
+--   insert into public.levels (user_id, symbol, tf, kind, price, price_to, note) values
+--     (uid, 'BTCUSDT', '1d', 'support',    64200, null,  'Дневная поддержка'),
+--     (uid, 'BTCUSDT', '1d', 'resistance', 65800, null,  null),
+--     (uid, 'BTCUSDT', '1h', 'zone',       63000, 63400, 'Зона спроса');
+--   insert into public.symbol_map (user_id, symbol, target, target_symbol)
+--   values (uid, 'BTCUSDT', 'mt5', 'BTCUSD')
+--   on conflict (user_id, symbol, target) do nothing;
+-- end $$;
+
+select 1; -- keep the file non-empty for tooling
