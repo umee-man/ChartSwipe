@@ -158,6 +158,12 @@ useGestures(root, {
     if (!symbol || !res) return
     if (levels.add(symbol, res.price, settings.activeTf)) vibrate(res.snapped ? VIBRATE_SNAP : VIBRATE_PLACE)
   },
+  // A21: mouse click on the chart → level at exactly the price the (magnet-pinned) crosshair shows.
+  onMouseClick({ x, y }) {
+    const symbol = feed.currentSymbol
+    const res = currentSlide()?.magnetAt(x, y, 'mouse', settings.magnetRadius)
+    if (symbol && res) levels.add(symbol, res.price, settings.activeTf)
+  },
   // Item 1: drag the plaque vertically → move; swipe it right > 60 px → delete (undo toast).
   onLevelMove(dx, dy, { x, pointerType }) {
     const d = levels.drag

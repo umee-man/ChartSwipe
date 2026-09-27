@@ -12,6 +12,7 @@ import {
   exceedsLongPressSlop,
   isDoubleTap,
   isInEdgeDeadZone,
+  isMouseClick,
   LONG_PRESS_MS,
   LONG_PRESS_SLOP,
   resolveDirection,
@@ -43,6 +44,11 @@ export interface GestureHandlers {
   onLevelMove?(dx: number, dy: number, p: { x: number; y: number; pointerType: string }): void
   /** Item 1: plaque released. `tap` = short press without movement (opens the level sheet). */
   onLevelEnd?(dx: number, dy: number, info: { tap: boolean; cancelled: boolean }): void
+  /**
+   * A21: mouse click on the chart (quick, < 4 px) → place a level. Fired after the double-click window so
+   * a double-click stays "reset view" and never places two levels. Touch never fires this (long press).
+   */
+  onMouseClick?(p: { x: number; y: number }): void
 }
 
 /** Elements that handle their own taps (buttons, menus) never produce double-tap resets. */
@@ -59,6 +65,11 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
   let startPointerType = 'touch'
   let lastTap: Tap | null = null
   let longPressTimer: ReturnType<typeof setTimeout> | null = null
+  let clickTimer: ReturnType<typeof setTimeout> | null = null
+  function clearClick() {
+    if (clickTimer) clearTimeout(clickTimer)
+    clickTimer = null
+  }
 
   function clearLongPress() {
     if (longPressTimer) clearTimeout(longPressTimer)
@@ -112,7 +123,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
       return
     }
     mode.value = 'pending'
-    if (h.onLongPress) {
+    if (h.onLongPress && e.pointerType !== 'mouse') {
       longPressTimer = setTimeout(() => {
         longPressTimer = null
         if (mode.value !== 'pending' || pointers.size !== 1) return
@@ -140,6 +151,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
       const dir = resolveDirection(dx, dy, cfg) // item 3
       if (dir) {
         clearLongPress()
+        clearClick() // click then immediately pan/swipe → that click was not a placement
         mode.value = dir
       }
       if (dir === 'feed') cancelChartLongTap()
@@ -168,9 +180,17 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
         const tap: Tap = { t: e.timeStamp, x: e.clientX, y: e.clientY }
         if (isDoubleTap(lastTap, tap, cfg)) {
           lastTap = null
+          clearClick() // the first click of a double-click must not place a level
           h.onDoubleTap?.({ x: tap.x, y: tap.y })
         } else {
           lastTap = tap
+          if (startPointerType === 'mouse' && h.onMouseClick && isMouseClick(e.timeStamp - start.t, dx, dy)) {
+            clearClick()
+            clickTimer = setTimeout(() => {
+              clickTimer = null
+              h.onMouseClick?.({ x: tap.x, y: tap.y })
+            }, cfg.doubleTapMs)
+          }
         }
       }
     }
@@ -227,6 +247,7 @@ export function useGestures(el: Ref<HTMLElement | null>, h: GestureHandlers, cfg
   })
   onBeforeUnmount(() => {
     clearLongPress()
+    clearClick()
     const node = el.value
     if (!node) return
     for (const [type, fn] of listeners) node.removeEventListener(type, fn as EventListener, { capture: true })

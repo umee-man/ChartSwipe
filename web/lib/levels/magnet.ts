@@ -1,7 +1,7 @@
 // Magnet (arch §5.4, ADR A17): snap a level to the nearest candle wick around the finger.
 //  - Horizontal window in PIXELS (±32 px of the finger, at least ±3 bars): on zoomed-out Д/Н a bar is
 //    1–3 px wide, so a fixed ±3-bar window was narrower than a fingertip.
-//  - Vertical radius 24 px for touch (finger error), 12 px for mouse; configurable (settings.magnetRadius).
+//  - Vertical radius 24 px for touch (finger error), 16 px for mouse (A21); touch configurable (settings.magnetRadius).
 //  - Wicks first: highs and lows; open/close only if no wick is within the radius. On equal distance
 //    the more extreme wick wins (highest high / lowest low).
 import type { Candle } from '../binance/types'
@@ -10,7 +10,8 @@ import { roundToTick } from './model'
 export const MAGNET_WINDOW_PX = 32
 export const MAGNET_MIN_BARS = 3
 export const MAGNET_RADIUS_TOUCH_PX = 24
-export const MAGNET_RADIUS_MOUSE_PX = 12
+/** Mouse (A21): 16 px — a hovering cursor is less precise than it looks on a dense chart. */
+export const MAGNET_RADIUS_MOUSE_PX = 16
 /** Distances closer than this are treated as equal (then the more extreme wick wins). */
 const TIE_PX = 0.5
 

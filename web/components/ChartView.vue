@@ -401,8 +401,8 @@ function showSnapMarker(res: MagnetResult) {
   snapTimer = setTimeout(() => (snapMarker.value = null), SNAP_MARKER_MS)
 }
 
-/** Run the magnet (arch §5.4, A17) at pane point (x, y). */
-function magnetAtLocal(x: number, y: number, pointerType: string, touchRadius: number): MagnetResult | null {
+/** Run the magnet (arch §5.4, A17) at pane point (x, y). `feedback` = pop ring on a snap. */
+function magnetAtLocal(x: number, y: number, pointerType: string, touchRadius: number, feedback = true): MagnetResult | null {
   const series = priceSeries
   const c = chart.value
   if (!series || !c) return null
@@ -418,8 +418,48 @@ function magnetAtLocal(x: number, y: number, pointerType: string, touchRadius: n
     tickSize: props.tickSize,
     radiusPx: magnetRadiusFor(pointerType, touchRadius),
   })
-  if (res?.snapped) showSnapMarker(res)
+  if (res?.snapped && feedback) showSnapMarker(res)
   return res
+}
+
+// ---------------- mouse hover magnet (A21) ----------------
+
+/** Persistent ring on the wick the crosshair is snapped to while hovering with a mouse. */
+const hoverRing = ref<{ x: number; y: number } | null>(null)
+
+/**
+ * TradingView-style: while the mouse hovers near a wick (magnet rules, 16 px), pin LWC's crosshair to
+ * that wick's price/time, so a click places the level exactly there. Our listener sits on the host, i.e.
+ * it runs after LWC's own pane handler for the same event and therefore wins. Far from wicks the native
+ * free crosshair is left alone.
+ */
+function onHover(e: PointerEvent) {
+  if (e.pointerType !== 'mouse' || e.buttons !== 0) {
+    hoverRing.value = null
+    return
+  }
+  const c = chart.value
+  const series = priceSeries
+  const p = toLocal(e.clientX, e.clientY)
+  if (!c || !series || !p) return
+  const plotWidth = (host.value?.clientWidth ?? 0) - priceAxisWidth()
+  if (p.y < 0 || p.y > paneHeight() || p.x < 0 || p.x > plotWidth) {
+    hoverRing.value = null
+    return
+  }
+  const res = magnetAtLocal(p.x, p.y, 'mouse', MAGNET_RADIUS_DEFAULT, false)
+  const bar = res?.snapped && res.barIndex !== undefined ? store.get(props.symbol, props.tf)?.candles[res.barIndex] : undefined
+  if (!res || !bar) {
+    hoverRing.value = null
+    return
+  }
+  c.setCrosshairPosition(res.price, bar.time as UTCTimestamp, series)
+  const x = c.timeScale().logicalToCoordinate(res.barIndex as Logical)
+  const y = series.priceToCoordinate(res.price)
+  hoverRing.value = x === null || y === null ? null : { x, y }
+}
+function onHoverLeave() {
+  hoverRing.value = null
 }
 
 /** Magnet result for a long press at a client point, or null outside the price pane. */
@@ -527,6 +567,8 @@ onMounted(() => {
   load()
   syncPriceLines()
   startLayoutLoop()
+  host.value.addEventListener('pointermove', onHover)
+  host.value.addEventListener('pointerleave', onHoverLeave)
 })
 
 watch(
@@ -564,6 +606,8 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  host.value?.removeEventListener('pointermove', onHover)
+  host.value?.removeEventListener('pointerleave', onHoverLeave)
   if (snapTimer) clearTimeout(snapTimer)
   stopLayoutLoop()
   priceLines.clear()
@@ -598,6 +642,12 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, pr
 <template>
   <div class="chart-view">
     <div ref="host" class="chart-host" />
+    <div
+      v-if="hoverRing"
+      class="hover-ring"
+      aria-hidden="true"
+      :style="{ left: `${hoverRing.x}px`, top: `${hoverRing.y}px` }"
+    />
     <div
       v-if="snapMarker"
       :key="snapMarker.key"
@@ -636,6 +686,15 @@ defineExpose({ resetView, priceAxisWidth, clearCrosshair, hitLevel, magnetAt, pr
 .chart-host {
   position: absolute;
   inset: 0;
+}
+.hover-ring {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #ffb300;
+  border-radius: 50%;
+  pointer-events: none;
 }
 .snap-marker {
   position: absolute;

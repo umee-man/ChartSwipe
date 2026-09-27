@@ -173,3 +173,13 @@ export function levelDragIntent(dx: number, dy: number, lock = LEVEL_LOCK_DISTAN
 export function isDeleteSwipe(dx: number, threshold = LEVEL_DELETE_SWIPE): boolean {
   return dx > threshold
 }
+
+// ---------- mouse placement (A21) ----------
+
+/** A mouse click places a level: released within 250 ms and moved less than 4 px (not a pan). */
+export const MOUSE_CLICK_MAX_MS = 250
+export const MOUSE_CLICK_SLOP = 4
+
+export function isMouseClick(durationMs: number, dx: number, dy: number): boolean {
+  return durationMs <= MOUSE_CLICK_MAX_MS && Math.hypot(dx, dy) < MOUSE_CLICK_SLOP
+}

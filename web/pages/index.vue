@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Feed screen: `/` opens straight into the feed, no login or setup (ADR A9, A10).
 // Orchestrates preloading, the memory window and live WS streams (arch §4, §5.2).
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { liveSymbols, memorySymbols, preloadSymbols } from '~/lib/feed/window'
 import { preloadTfs } from '~/lib/candles/policy'
 import { tickDecimals } from '~/lib/binance/parse'
@@ -102,6 +102,14 @@ async function takeScreenshot() {
   }
 }
 
+/** Desktop with a mouse (A21) places levels by click; touch by long press. */
+const finePointer = ref(false)
+const hintText = computed(() =>
+  finePointer.value
+    ? 'Кликните по графику, чтобы поставить уровень · магнит к хвостам'
+    : 'Удерживайте палец на графике, чтобы поставить уровень',
+)
+
 const favoritesOpen = ref(false)
 const hiddenOpen = ref(false)
 const levelsOpen = ref(false)
@@ -130,6 +138,11 @@ function undoHide() {
 }
 
 onMounted(() => {
+  try {
+    finePointer.value = window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  } catch {
+    finePointer.value = false
+  }
   void feed.init()
   void levels.init()
 })
@@ -150,7 +163,7 @@ onBeforeUnmount(() => {
         {{ shotMessage.text }}
       </div>
       <div v-if="!levels.hintSeen && feed.currentSymbol" class="hint" data-gesture-ignore>
-        <span>Удерживайте палец на графике, чтобы поставить уровень</span>
+        <span>{{ hintText }}</span>
         <button type="button" @click="levels.dismissHint()">Понятно</button>
       </div>
       <div v-if="levels.lastDeleted" class="toast" data-gesture-ignore>

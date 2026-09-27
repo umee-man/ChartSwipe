@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Candle } from '../../lib/binance/types'
 import { mergeByUpdatedAt } from '../../lib/cache/levels'
-import { exceedsLongPressSlop, isDeleteSwipe, levelDragIntent } from '../../lib/gestures/arbiter'
+import { exceedsLongPressSlop, isDeleteSwipe, isMouseClick, levelDragIntent } from '../../lib/gestures/arbiter'
 import { hitTestLabels, LABEL_H, layoutLabels } from '../../lib/levels/labels'
 import { barWindow, magnetPrice, magnetRadiusFor } from '../../lib/levels/magnet'
 import { mergeCandles } from '../../lib/candles/merge'
@@ -170,7 +170,7 @@ describe('magnet (A17: px window, wicks first, 24/12 px radius)', () => {
   it('uses a 24 px touch radius and 12 px for mouse', () => {
     expect(magnetRadiusFor('touch')).toBe(24)
     expect(magnetRadiusFor('pen')).toBe(24)
-    expect(magnetRadiusFor('mouse')).toBe(12)
+    expect(magnetRadiusFor('mouse')).toBe(16) // A21
     expect(magnetRadiusFor('touch', 30)).toBe(30)
     // high 110 is 20 px from y 200 → snaps with the touch radius, not with the mouse radius
     const one = [bar(90, 110, 89, 91)] // high y 180, low y 222; body far
@@ -281,5 +281,15 @@ describe('level gestures', () => {
   it('deletes only past 60 px', () => {
     expect(isDeleteSwipe(60)).toBe(false)
     expect(isDeleteSwipe(61)).toBe(true)
+  })
+})
+
+describe('mouse click placement (A21)', () => {
+  it('is a click only when quick and still (not a pan)', () => {
+    expect(isMouseClick(120, 1, 2)).toBe(true)
+    expect(isMouseClick(250, 3, 0)).toBe(true)
+    expect(isMouseClick(251, 0, 0)).toBe(false) // held → not a click
+    expect(isMouseClick(100, 4, 0)).toBe(false) // moved 4 px → pan
+    expect(isMouseClick(100, 3, 3)).toBe(false) // hypot 4.2
   })
 })
